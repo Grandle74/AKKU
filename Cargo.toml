@@ -1,6 +1,8 @@
-[package]
-name = "YaST3-services"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
+[workspace]
+members = [
+    "cli",
+    "api",
+    "engine",
+    "modules/services"
+]
+default-members = ["cli"]

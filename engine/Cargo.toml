@@ -1,0 +1,10 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+#fs = { path = "../modules/fs" }
+#network = { path = "../modules/network" }
+#package = { path = "../modules/package" }
+services = { path = "../modules/services" }

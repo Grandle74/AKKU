@@ -3,5 +3,27 @@
 version = 4
 
 [[package]]
-name = "YaST3-services"
+name = "api"
+version = "0.1.0"
+dependencies = [
+ "engine",
+ "services",
+]
+
+[[package]]
+name = "cli"
+version = "0.1.0"
+dependencies = [
+ "api",
+]
+
+[[package]]
+name = "engine"
+version = "0.1.0"
+dependencies = [
+ "services",
+]
+
+[[package]]
+name = "services"
 version = "0.1.0"
