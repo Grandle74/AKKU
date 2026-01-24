@@ -1,37 +1,53 @@
-use engine::{Action, Domain, OrderMore, OrderTwo};
+use engine::{ActionArgs, ActionNoArgs, Domain, OrderArgs, OrderNoArgs, OrderType};
 
 //function must not return a value, but to manage the order and send it to the engl
-pub fn two_com_to_ord(command: Vec<String>) -> Result<OrderTwo, String> {
+pub fn noargs_com_to_ord(command: Vec<String>) -> Result<OrderType, String> {
     match command[0].as_str() {
         "service" => {
-            let action = service_action_matcher(&command[1])?; // This unwraps or returns error
-            Ok(OrderTwo {
+            let action = service_no_args_matcher(&command[1])?; // This unwraps or returns error
+            Ok(OrderType::NoArgs(OrderNoArgs {
                 domain: Domain::Services,
                 action,
-                target: "".to_string(),
-            })
+            }))
         }
         _ => Err("Command not recognized - see \"help\" command for more information.".to_string()),
     }
 }
 
-pub fn with_arg_com_to_ord(command: Vec<&str>) {
-    match command[0] {
-        "service" => {}
-        _ => panic!("Command not recognized - see \"help\" command for more information."),
+pub fn com_to_ord(command: (String, String, Vec<String>)) -> Result<OrderType, String> {
+    match command.0.as_str() {
+        "service" => {
+            let action = service_action_matcher(&command.1)?; // This unwraps or returns error
+            Ok(OrderType::Args(OrderArgs {
+                domain: Domain::Services,
+                action,
+                arguments: command.2,
+            }))
+        }
+        _ => Err("Command not recognized - see \"help\" command for more information.".to_string()),
     }
 }
 
-fn service_action_matcher(actions: &String) -> Result<Action, String> {
+fn service_no_args_matcher(actions: &String) -> Result<ActionNoArgs, String> {
     match actions.as_str() {
-        "run" | "start" => Ok(Action::Start),
-        "stop" | "kill" => Ok(Action::Stop),
-        "remove" | "delete" => Ok(Action::Remove),
-        "list" | "show" => Ok(Action::List),
-        "enable" | "allow" => Ok(Action::Enable),
-        "disable" | "deny" => Ok(Action::Disable),
-        "reload" | "restart" => Ok(Action::Reload),
-        "help" => Ok(Action::Help),
+        "list" | "show" => Ok(ActionNoArgs::List),
+        "help" => Ok(ActionNoArgs::Help),
+        _ => Err(
+            "Command not recognized - see \"service help\" command for more information."
+                .to_string(),
+        ),
+    }
+}
+
+fn service_action_matcher(actions: &String) -> Result<ActionArgs, String> {
+    match actions.as_str() {
+        "status" => Ok(ActionArgs::Status),
+        "run" | "start" => Ok(ActionArgs::Start),
+        "stop" | "kill" => Ok(ActionArgs::Stop),
+        "remove" | "delete" => Ok(ActionArgs::Remove),
+        "enable" | "allow" => Ok(ActionArgs::Enable),
+        "disable" | "deny" => Ok(ActionArgs::Disable),
+        "reload" | "restart" => Ok(ActionArgs::Reload),
         _ => Err(
             "Command not recognized - see \"service help\" command for more information."
                 .to_string(),

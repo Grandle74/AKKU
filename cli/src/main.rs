@@ -1,4 +1,4 @@
-use api::two_com_to_ord;
+use api::{com_to_ord, noargs_com_to_ord};
 use engine::service;
 use std::io::{self, Write};
 
@@ -32,7 +32,7 @@ fn main() {
                 }
                 _ => println!("Invalid command - see \"help\" command for more information."),
             },
-            2 => match two_com_to_ord(command_splitted) {
+            2 => match noargs_com_to_ord(command_splitted) {
                 Ok(order) => {
                     service(order);
                 }
@@ -41,13 +41,21 @@ fn main() {
                 }
             },
             _ => {
+                //converting the commands type into a tuple
                 let command: (String, String, Vec<String>) = {
                     let command = command_splitted[0].to_string();
                     let subcommand = command_splitted[1].to_string();
                     let args = command_splitted[2..].to_vec();
                     (command, subcommand, args)
                 };
-                println!("this is a 3+ words command.");
+                match com_to_ord(command) {
+                    Ok(order) => {
+                        service(order);
+                    }
+                    Err(err) => {
+                        println!("Error: {}", err);
+                    }
+                }
             }
         }
         /*
