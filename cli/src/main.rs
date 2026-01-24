@@ -1,10 +1,11 @@
-use api::command_to_order;
+use api::two_com_to_ord;
+use engine::service;
 use std::io::{self, Write};
 
 fn main() {
     println!("Welcome to YaST3 (prototype)!");
 
-    println!("This is a prototype of YaST3, a system configuration tool.\n");
+    println!("This is a prototype of YaST3, a system configuration tool. Have fun!\n");
 
     println!("enter \"help\" for commands list");
     'com_loop: loop {
@@ -13,16 +14,41 @@ fn main() {
         //input method:
         let mut command_in = String::new();
         io::stdin().read_line(&mut command_in).unwrap();
-        let command = command_in.split_whitespace().collect::<Vec<&str>>();
+        let command_splitted = command_in
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>();
         //check if command is valid
-        if command.len() == 3 {
-            //let command: Vec<String> = command.iter().map(|s| s.to_string()).collect();
-            command_to_order(command);
-        } else {
-            println!(
-                "Invalid command - see \"{} help\" command for more information.",
-                command[0]
-            );
+        match command_splitted.len() {
+            0 => {}
+            1 => match command_splitted[0].as_str() {
+                "help" => {}
+                "exit" => {
+                    println!("Exiting...");
+                    break 'com_loop;
+                }
+                "service" => {
+                    println!("see \"service help\" command for more information.");
+                }
+                _ => println!("Invalid command - see \"help\" command for more information."),
+            },
+            2 => match two_com_to_ord(command_splitted) {
+                Ok(order) => {
+                    service(order);
+                }
+                Err(err) => {
+                    println!("Error: {}", err);
+                }
+            },
+            _ => {
+                let command: (String, String, Vec<String>) = {
+                    let command = command_splitted[0].to_string();
+                    let subcommand = command_splitted[1].to_string();
+                    let args = command_splitted[2..].to_vec();
+                    (command, subcommand, args)
+                };
+                println!("this is a 3+ words command.");
+            }
         }
         /*
                 match input.trim() {

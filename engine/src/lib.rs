@@ -1,6 +1,36 @@
 use std::io::{self, Write};
 
-pub fn service() {
+pub struct OrderTwo {
+    //idk what kind of type to use here for now
+    pub domain: Domain,
+    pub action: Action,
+    pub target: String,
+}
+pub struct OrderMore {
+    //idk what kind of type to use here for now
+    pub domain: Domain,
+    pub action: Action,
+    pub target: Vec<String>,
+}
+
+pub enum Domain {
+    //the "modules" the user wants to interact with
+    Services,
+}
+
+pub enum Action {
+    //the "actions" the user wants to perform
+    Start,
+    Stop,
+    Remove,
+    List,
+    Enable,
+    Disable,
+    Reload,
+    Help,
+}
+
+pub fn service(order: OrderTwo) {
     print!("Enter service name: ");
     io::stdout().flush().unwrap();
     let mut service_name = String::new();
