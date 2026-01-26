@@ -24,49 +24,65 @@ pub fn status_service(service: Vec<String>) -> [String; 2] {
 }
 
 pub fn start_service(service: Vec<String>) {
-    Command::new("systemctl")
-        .args(["start", &service[0]])
-        .spawn()
+    Command::new("sudo")
+        .args(["systemctl", "start", &service[0]])
+        .output()
         .expect("Failed to spawn systemctl command");
+
+    // Add a small delay to let systemd update the status
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    let child_status = Command::new("systemctl")
+        .args(["is-active", &service[0]])
+        .output()
+        .expect("Failed to check status");
+
+    println!(
+        "Starting \"{}\": {}",
+        service[0],
+        String::from_utf8_lossy(&child_status.stdout)
+    );
 }
 
 pub fn stop_service(service: Vec<String>) {
-    Command::new("systemctl")
-        .args(["stop", &service[0]])
-        .spawn()
-        .expect("Failed to spawn systemctl command");
+    Command::new("sudo")
+        .args(["systemctl", "stop", &service[0]])
+        .status()
+        .expect("Failed to run systemctl command");
 }
 pub fn reload_service(service: Vec<String>) {
-    Command::new("systemctl")
-        .args(["reload-or-restart", &service[0]])
-        .spawn()
-        .expect("Failed to spawn systemctl command");
+    Command::new("sudo")
+        .args(["systemctl", "reload-or-restart", &service[0]])
+        .status()
+        .expect("Failed to run systemctl command");
 }
 pub fn enable_service(service: Vec<String>) {
-    Command::new("systemctl")
-        .args(["enable", &service[0]])
-        .spawn()
-        .expect("Failed to spawn systemctl command");
+    Command::new("sudo")
+        .args(["systemctl", "enable", &service[0]])
+        .status()
+        .expect("Failed to run systemctl command");
 }
 
 pub fn disable_service(service: Vec<String>) {
-    Command::new("systemctl")
-        .args(["disable", &service[0]])
-        .spawn()
-        .expect("Failed to spawn systemctl command");
+    Command::new("sudo")
+        .args(["systemctl", "disable", &service[0]])
+        .status()
+        .expect("Failed to run systemctl command");
 }
 pub fn remove_service(service: Vec<String>) {
     Command::new("systemctl")
         .args(["remove", &service[0]])
-        .spawn()
-        .expect("Failed to spawn systemctl command");
+        .status()
+        .expect("Failed to run systemctl command");
 }
 
 pub fn list_services() {
-    Command::new("systemctl")
-        .args(["list-units", "--type=service"])
+    let mut child = Command::new("sh")
+        .args(["-c", "systemctl list-units --type=service"])
         .spawn()
         .expect("Failed to spawn systemctl command");
+    child.wait().expect("Failed to wait for systemctl command");
+    println!("batata command completed!")
 }
 
 pub fn help_service() {
@@ -78,4 +94,6 @@ pub fn help_service() {
     println!("  enable    Enable a service");
     println!("  disable   Disable a service");
     println!("  remove    Remove a service");
+    println!("  list      List all services");
+    println!("  status    Show the status of a service");
 }
