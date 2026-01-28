@@ -1,5 +1,7 @@
 use std::process::{Command, Stdio};
+mod error_catcher;
 
+// Status service returns [is-active, is-enabled]
 pub fn status_service(service: Vec<String>) -> [String; 2] {
     let comm_active = Command::new("systemctl")
         .args(["is-active", &service[0]])
@@ -21,27 +23,6 @@ pub fn status_service(service: Vec<String>) -> [String; 2] {
             .trim()
             .to_string(),
     ];
-}
-
-pub fn start_service(service: Vec<String>) {
-    Command::new("sudo")
-        .args(["systemctl", "start", &service[0]])
-        .output()
-        .expect("Failed to spawn systemctl command");
-
-    // Add a small delay to let systemd update the status
-    std::thread::sleep(std::time::Duration::from_millis(200));
-
-    let child_status = Command::new("systemctl")
-        .args(["is-active", &service[0]])
-        .output()
-        .expect("Failed to check status");
-
-    println!(
-        "Starting \"{}\": {}",
-        service[0],
-        String::from_utf8_lossy(&child_status.stdout)
-    );
 }
 
 pub fn stop_service(service: Vec<String>) {
@@ -90,10 +71,35 @@ pub fn help_service() {
     println!("Commands:");
     println!("  start     Start a service");
     println!("  stop      Stop a service");
-    println!("  reload    Reload a service");
-    println!("  enable    Enable a service");
-    println!("  disable   Disable a service");
-    println!("  remove    Remove a service");
+    println!("  reload    Reload or restart a service");
+    println!("  enable    Enable a service to start at boot");
+    println!("  disable   Disable a service from starting at boot");
+    // println!("  mask      Prevent a service from being started");
     println!("  list      List all services");
     println!("  status    Show the status of a service");
+}
+
+// In case of starting failure, this function returns an error message
+pub fn start_service(service: Vec<String>) {
+    // "child" is the needed execution command,
+    // "child_status" is the needed status of the child command to catch error efficiently
+    let mut child = Command::new("sudo")
+        .args(["systemctl", "start", &service[0]])
+        .spawn()
+        .expect("Failed to spawn systemctl command");
+    child.wait().expect("Failed to Wait child");
+    // This adds a small delay to let systemd update the status -- it's the only solution
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+
+    let child_status = Command::new("systemctl")
+        .args([
+            "show",
+            &service[0],
+            "--property=LoadState,CanStart,Result,ActiveState,MainPID",
+        ])
+        .output()
+        .expect("Failed to check status");
+    // Findout how to use error_catcher() properly...
+    // Ig by Returning Starting Action Result
+    println!("{:#?}", error_catcher::error_catcher(child_status));
 }
