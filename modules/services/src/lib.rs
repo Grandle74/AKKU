@@ -1,4 +1,6 @@
 use std::process::{Command, Stdio};
+
+use crate::error_catcher::ChildProperties;
 mod error_catcher;
 
 // Status service returns [is-active, is-enabled]
@@ -81,25 +83,14 @@ pub fn help_service() {
 
 // In case of starting failure, this function returns an error message
 pub fn start_service(service: Vec<String>) {
-    // "child" is the needed execution command,
-    // "child_status" is the needed status of the child command to catch error efficiently
+    // "child" is the needed execution command
     let mut child = Command::new("sudo")
         .args(["systemctl", "start", &service[0]])
         .spawn()
         .expect("Failed to spawn systemctl command");
     child.wait().expect("Failed to Wait child");
-    // This adds a small delay to let systemd update the status -- it's the only solution
-    std::thread::sleep(std::time::Duration::from_millis(1000));
+    // dbg
+    let debg = ChildProperties::new(service[0].clone());
 
-    let child_status = Command::new("systemctl")
-        .args([
-            "show",
-            &service[0],
-            "--property=LoadState,CanStart,Result,ActiveState,MainPID",
-        ])
-        .output()
-        .expect("Failed to check status");
-    // Findout how to use error_catcher() properly...
-    // Ig by Returning Starting Action Result
-    println!("{:#?}", error_catcher::error_catcher(child_status));
+    println!("{:#?}", debg)
 }

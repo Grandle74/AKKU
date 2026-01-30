@@ -1,223 +1,84 @@
-use std::process::Output;
+use std::process::Command;
 
 #[derive(Debug)]
 pub struct ChildProperties {
     // Property: (Value, Fail/Success, Reason)
-    load_state: (String, bool, String),
-    active_state: (String, bool, String),
-    result: (String, bool, String),
-    main_pid: (String, bool, String),
-    can_start: (String, bool, String),
+    pub load_state: String,
+    pub active_state: String,
+    pub result: String,
+    pub main_pid: String,
+    pub can_start: String,
 }
-pub fn error_catcher(child_status: Output) -> ChildProperties {
-    // Not Ideal Instance, shall work on it later...
-    /*
-    let mut thee = ChildProperties {
-        load_state: (String::new(), false, String::new()),
-        active_state: (String::new(), false, String::new()),
-        result: (String::new(), false, String::new()),
-        main_pid: (String::new(), false, String::new()),
-        can_start: (String::new(), false, String::new()),
-    };
-    */
-    let child_status = String::from_utf8_lossy(&child_status.stdout)
-        .trim()
-        .to_string();
-    // Collecting a vector of service's properties
-    let child_status: Vec<&str> = child_status.lines().map(|s| s).collect();
-    // Deviding the Property and its Value into Tuple(Property, Value)
-    let child_status: Vec<(&str, &str)> = child_status
-        .iter()
-        .map(|s| {
-            let mut val = s.split("=");
-            (val.next().unwrap(), val.next().unwrap())
-        })
-        .collect();
-    //dbg
-    println!("{:?}", child_status);
 
-    // Transforming the Vector into a Valid Struct "ChildProperties"
-    // first declaring a variable of type ChildProperties
-    let mut thee_collector: Vec<(String, bool, String)> = [].to_vec();
+impl ChildProperties {
+    pub fn new(service: String) -> Self {
+        let mut prop = Self {
+            load_state: "".to_string(),
+            active_state: "".to_string(),
+            result: "".to_string(),
+            main_pid: "".to_string(),
+            can_start: "".to_string(),
+        };
 
-    // Put this for loop inside the instance of thee_collector
-    //
-    for i in 0..child_status.len() {
-        match child_status[i] {
-            ("LoadState", _) => {
-                if child_status[i].1 == "loaded" {
-                    thee_collector.push((
-                        child_status[i].0.to_string(),
-                        true,
-                        "Service exists and loaded correctly".to_string(),
-                    ));
-                } else {
-                    match child_status[i].1 {
-                        "not-found" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Service doesn't exist".to_string(),
-                        )),
-                        "masked" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Service is blocked/masked".to_string(),
-                        )),
-                        "error" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Configuration error in unit file"
-                                .to_string(),
-                        )),
-                        _ => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Error Unknown".to_string(),
-                        )),
-                    }
+        prop.prop_parser(service);
+        return prop;
+    }
+
+    fn prop_parser(&mut self, service: String) {
+        // This adds a small delay to let systemd update the status -- it's the only solution
+        std::thread::sleep(std::time::Duration::from_millis(3000));
+        // "child_status" is the needed status of the child command to catch error efficiently
+        let child_status = Command::new("systemctl")
+            .args([
+                "show",
+                &service,
+                //the following are all the needed properties to cover 100% of results
+                "--property=LoadState,CanStart,Result,ActiveState,MainPID",
+            ])
+            .output()
+            .expect("Failed to check status");
+
+        let child_status = String::from_utf8_lossy(&child_status.stdout)
+            .trim()
+            .to_string();
+        // Collecting a vector of service's properties
+        let child_status: Vec<&str> = child_status.lines().map(|s| s).collect();
+        // Deviding the Property and its Value into Tuple(Property, Value)
+        let child_status: Vec<(&str, &str)> = child_status
+            .iter()
+            .map(|s| {
+                let mut val = s.split("=");
+                (val.next().unwrap(), val.next().unwrap())
+            })
+            .collect();
+        // dbg
+        // println!("{:?}", child_status);
+
+        // Transforming "child_status" into a Valid Struct "ChildProperties"
+        // i.e.: Storing each Property Value with its right Struct Field
+        for i in 0..child_status.len() {
+            match child_status[i].0 {
+                "LoadState" => {
+                    self.load_state = child_status[i].1.to_string();
                 }
-            }
-            ("ActiveState", _) => {
-                if child_status[i].1 == "active" {
-                    thee_collector.push((
-                        child_status[i].0.to_string(),
-                        true,
-                        "Service is running!".to_string(),
-                    ));
-                } else {
-                    match child_status[i].1 {
-                        "failed" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Service failed to start or crashed"
-                                .to_string(),
-                        )),
-                        "inactive" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Service is stopped".to_string(),
-                        )),
-                        _ => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Error Unknown".to_string(),
-                        )),
-                    }
+                "ActiveState" => {
+                    self.active_state = child_status[i].1.to_string();
                 }
-            }
-            // thi handles what? findout and work on it
-            ("Result", _) => {
-                if child_status[i].1 == "success" {
-                    thee_collector.push((
-                        child_status[i].0.to_string(),
-                        true,
-                        "No error".to_string(),
-                    ));
-                } else {
-                    match child_status[i].1 {
-                        "exit-code" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Exited with non-zero code".to_string(),
-                        )),
-                        "timeout" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Start/Stop timeout exceeded".to_string(),
-                        )),
-                        "signal" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Killed by signal (SIGTERM/SIGKILL)"
-                                .to_string(),
-                        )),
-                        "core-dump" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Crashed and dumped core".to_string(),
-                        )),
-                        "watchdog" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Watchdog timeout".to_string(),
-                        )),
-                        "recources" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Resource limit hit".to_string(),
-                        )),
-                        "start-limit-hit" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Too many restart attempts".to_string(),
-                        )),
-                        _ => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Error Unknown".to_string(),
-                        )),
-                    }
+                "Result" => {
+                    self.result = child_status[i].1.to_string();
                 }
-            }
-            ("MainPID", _) => {
-                if let Ok(code) = child_status[i].1.parse::<u32>() {
-                    if code == 0 {
-                        thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - No process (either failed or special service type)".to_string()))
-                    } else {
-                        thee_collector.push((
-                            child_status[i].0.to_string(),
-                            true,
-                            "Process is running".to_string(),
-                        ))
-                    }
-                } else {
-                    // Need to hndle the error with better way
-                    panic!("Error: Failed to parse Code");
+                "MainPID" => {
+                    self.main_pid = child_status[i].1.to_string();
                 }
-            }
-            ("CanStart", _) => {
-                if child_status[i].1 == "yes" {
-                    thee_collector.push((
-                        child_status[i].0.to_string(),
-                        true,
-                        "Service Can Start".to_string(),
-                    ));
-                } else {
-                    match child_status[i].1 {
-                        "no" => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Service Cannot be started".to_string(),
-                        )),
-                        _ => thee_collector.push((
-                            child_status[i].0.to_string(),
-                            false,
-                            "Failed to start service - Error Unknown".to_string(),
-                        )),
-                    }
+                "CanStart" => {
+                    self.can_start = child_status[i].1.to_string();
                 }
-            }
-            _ => {
-                panic!("No Properties for some reason... go fix your code!")
+                _ => {
+                    panic!("No Properties for some reason... go fix your code!")
+                }
             }
         }
     }
-
-    // thee_collecor would give tuples in the following order
-    // MainPID -> Result -> LoadState -> ActiveState -> CanStart
-    // to check, run the following:
-    // println!("{:#?}", thee_collector);
-
-    return ChildProperties {
-        main_pid: thee_collector[0].clone(),
-        result: thee_collector[1].clone(),
-        load_state: thee_collector[2].clone(),
-        active_state: thee_collector[3].clone(),
-        can_start: thee_collector[4].clone(),
-    };
 }
 
 /*

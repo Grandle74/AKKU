@@ -173,7 +173,7 @@ The output shows each phase of the workflow. Here's what a successful run looks 
 │ ✓ Would install nginx                            │
 │ ✓ Would enable service at boot                   │
 │ ✓ Would start service                            │
-│                                                   │
+│                                                  │
 │ No conflicts detected                            │
 └──────────────────────────────────────────────────┘
 
@@ -183,7 +183,7 @@ Apply changes? [y/N]: y
 │ [1/3] Installing nginx... ✓                      │
 │ [2/3] Enabling service... ✓                      │
 │ [3/3] Starting service... ✓                      │
-│                                                   │
+│                                                  │
 │ Duration: 842ms                                  │
 │ Status: SUCCESS                                  │
 └──────────────────────────────────────────────────┘

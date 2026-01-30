@@ -22,7 +22,14 @@ fn main() {
         match command_splitted.len() {
             0 => {}
             1 => match command_splitted[0].as_str() {
-                "help" => {}
+                "help" => {
+                    println!("Available commands:");
+                    println!("network - Configure network settings (unavailable yet)");
+                    println!("user - Manage user accounts (unavailable yet)");
+                    println!("package - Install software packages (unavailable yet)");
+                    println!("service - Configure system services");
+                    println!("exit - Exit");
+                }
                 "exit" => {
                     println!("Exiting...");
                     break 'com_loop;
@@ -41,7 +48,7 @@ fn main() {
                 }
             },
             _ => {
-                //converting the commands type into a tuple
+                //converting the commands type into a tuple <- this is the intent, i shall redesign
                 let command: (String, String, Vec<String>) = {
                     let command = command_splitted[0].to_string();
                     let subcommand = command_splitted[1].to_string();
@@ -58,28 +65,5 @@ fn main() {
                 }
             }
         }
-        /*
-                match input.trim() {
-                    "help" => {
-                        println!("Available commands:");
-                        println!("network - Configure network settings (unavailable yet)");
-                        println!("user - Manage user accounts (unavailable yet)");
-                        println!("package - Install software packages (unavailable yet)");
-                        println!("service - Configure system services");
-                        println!("exit - Exit");
-                    }
-                    "networks" => println!("Network settings configuration is not available yet."),
-                    "users" => println!("User account management is not available yet."),
-                    "packages" => println!("Software package installation is not available yet."),
-                    "service" => {
-                        println!("Starting System services configuration...");
-                        services_cli::service_cli();
-                    }
-                    _ => {
-                        println!("Exiting YaST3 (prototype)...");
-                        break 'com_loop;
-                    }
-                }
-        */
     }
 }
