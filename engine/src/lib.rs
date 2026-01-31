@@ -35,6 +35,7 @@ pub enum ActionNoArgs {
     //the "actions" the user wants to perform
     List,
     Help,
+    Reset,
 }
 
 pub enum OrderType {
@@ -51,6 +52,9 @@ pub fn service(order: OrderType) {
 
             ActionNoArgs::Help => {
                 services::help_service();
+            }
+            ActionNoArgs::Reset => {
+                services::reset_service();
             }
         },
         OrderType::Args(more) => match more.action {

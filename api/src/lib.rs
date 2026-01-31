@@ -31,6 +31,7 @@ pub fn com_to_ord(command: (String, String, Vec<String>)) -> Result<OrderType, S
 fn service_no_args_matcher(actions: &String) -> Result<ActionNoArgs, String> {
     match actions.as_str() {
         "list" | "show" => Ok(ActionNoArgs::List),
+        "reset" => Ok(ActionNoArgs::Reset),
         "help" => Ok(ActionNoArgs::Help),
         _ => Err(
             "Command not recognized - see \"service help\" command for more information."

@@ -2,12 +2,12 @@ use std::process::Command;
 
 #[derive(Debug)]
 pub struct ChildProperties {
-    // Property: (Value, Fail/Success, Reason)
-    pub load_state: String,
-    pub active_state: String,
-    pub result: String,
-    pub main_pid: String,
-    pub can_start: String,
+    pub load_state: String,            // preflight only
+    pub active_state: String,          // required
+    pub sub_state: String,             // required
+    pub result: String,                // required
+    pub exec_main_status: Option<i32>, // numeric truth
+    pub main_pid: Option<u32>,         // informational
 }
 
 impl ChildProperties {
@@ -15,9 +15,10 @@ impl ChildProperties {
         let mut prop = Self {
             load_state: "".to_string(),
             active_state: "".to_string(),
+            sub_state: "".to_string(),
             result: "".to_string(),
-            main_pid: "".to_string(),
-            can_start: "".to_string(),
+            main_pid: None,
+            exec_main_status: None,
         };
 
         prop.prop_parser(service);
@@ -33,7 +34,7 @@ impl ChildProperties {
                 "show",
                 &service,
                 //the following are all the needed properties to cover 100% of results
-                "--property=LoadState,CanStart,Result,ActiveState,MainPID",
+                "--property=LoadState,ExecMainStatus,Result,ActiveState,MainPID,SubState",
             ])
             .output()
             .expect("Failed to check status");
@@ -68,10 +69,25 @@ impl ChildProperties {
                     self.result = child_status[i].1.to_string();
                 }
                 "MainPID" => {
-                    self.main_pid = child_status[i].1.to_string();
+                    self.main_pid = {
+                        if child_status[i].1.to_string().parse::<u32>().is_ok() {
+                            Some(child_status[i].1.to_string().parse::<u32>().unwrap())
+                        } else {
+                            None
+                        }
+                    };
                 }
-                "CanStart" => {
-                    self.can_start = child_status[i].1.to_string();
+                "ExecMainStatus" => {
+                    self.exec_main_status = {
+                        if child_status[i].1.to_string().parse::<i32>().is_ok() {
+                            Some(child_status[i].1.to_string().parse::<i32>().unwrap())
+                        } else {
+                            None
+                        }
+                    };
+                }
+                "SubState" => {
+                    self.sub_state = child_status[i].1.to_string();
                 }
                 _ => {
                     panic!("No Properties for some reason... go fix your code!")
@@ -81,44 +97,143 @@ impl ChildProperties {
     }
 }
 
-/*
-## **All possible values for Starting service (minimal set):**
+pub fn start_validation(service: Vec<String>) {
+    let props = ChildProperties::new(service[0].clone());
+    // dbg
+    // println!("{:#?}", props);
+    let mut vals: Vec<String> = Vec::new();
+    let mut error_counter: u8 = 0;
 
-### **LoadState** (Does service exist?)
-```
-✓ "loaded"     → Service exists and loaded correctly
-✗ "not-found"  → Service doesn't exist
-✗ "masked"     → Service is blocked/masked
-✗ "error"      → Configuration error in unit file
-```
+    // 1st Layer
+    match props.load_state.as_str() {
+        "loaded" => {
+            vals.push("Service exists and loaded correctly".to_string());
+        }
+        _ => {
+            vals.push("Service doesn't exist".to_string());
+            error_counter += 1;
+            output(vals, service, error_counter);
+            return;
+        }
+    }
 
-### **ActiveState** (Is it running?)
-```
-✓ "active"      → Service is running
-✗ "failed"      → Service failed to start or crashed
-✗ "inactive"    → Service is stopped
-```
+    // Not a Layer
+    // Aslong as the service is loaded, the main PID is not None
+    if props.main_pid.is_some() {
+        vals.push(format!("Main PID: {}", props.main_pid.unwrap()));
+    } else {
+        vals.push(format!(
+            "Main PID: {} - not running",
+            props.main_pid.unwrap()
+        ));
+    }
 
-### **Result** (Why did it fail?)
-```
-✓ "success"          → No error
-✗ "exit-code"        → Exited with non-zero code
-✗ "timeout"          → Start/stop timeout exceeded
-✗ "signal"           → Killed by signal (SIGTERM/SIGKILL)
-✗ "core-dump"        → Crashed and dumped core
-✗ "watchdog"         → Watchdog timeout
-✗ "resources"        → Resource limit hit
-✗ "start-limit-hit"  → Too many restart attempts
-```
+    // 2nd Layer
+    match props.exec_main_status {
+        Some(0) => {}
+        Some(126) => {
+            vals.push("Permission denied".to_string());
+            error_counter += 1;
+            output(vals, service, error_counter);
+            return;
+        }
+        Some(127) => {
+            vals.push("Executable not found".to_string());
+            error_counter += 1;
+            output(vals, service, error_counter);
+            return;
+        }
+        Some(status) if status >= 128 => {
+            vals.push(format!("Service crashed via signal {}", status - 128));
+            error_counter += 1;
+            output(vals, service, error_counter);
+            return;
+        }
+        _ => {
+            if let Some(petipain) = props.exec_main_status {
+                vals.push(format!("Exec Main Status: {}", petipain));
+                error_counter += 1;
+                output(vals, service, error_counter);
+                return;
+            }
+        }
+    }
 
-### **MainPID** (Is process alive?)
-```
-✓ > 0  → Process is running
-✗ = 0  → No process (either failed or special service type)
-```
+    // 3rd Layer
+    if props.result.as_str() != "success" {
+        error_counter += 1;
+        output(vals, service, error_counter);
+        return;
+    }
 
-### **CanStart** (Permission check)
-```
-✓ "yes" → Can be started
-✗ "no"  → Cannot be started (permissions/dependencies)
-*/
+    // 4th Layer
+    match props.active_state.as_str() {
+        "active" => {
+            vals.push("Service is running".to_string());
+        }
+        "activating" | "deactivating" => {
+            vals.push("Action stuck - Timeout".to_string());
+            error_counter += 1;
+            output(vals, service, error_counter);
+            return;
+        }
+        _ => {
+            vals.push("Failed to start service".to_string());
+            error_counter += 1;
+            output(vals, service, error_counter);
+            return;
+        }
+    }
+
+    // 5th Layer
+    match props.sub_state.as_str() {
+        "running" => {
+            //println!("Service is running")
+        }
+        "exited" => {
+            vals.push("Service exited with error".to_string());
+            error_counter += 1;
+            output(vals, service, error_counter);
+            return;
+        }
+        "failed" => {
+            vals.push("Service failed to start".to_string());
+            error_counter += 1;
+            output(vals, service, error_counter);
+            return;
+        }
+        "auto-restart" => {
+            vals.push("Service crashed".to_string());
+            error_counter += 1;
+            output(vals, service, error_counter);
+            return;
+        }
+        "dead" => {
+            vals.push("Service died unexpectedly".to_string());
+            error_counter += 1;
+            output(vals, service, error_counter);
+            return;
+        }
+        _ => {
+            vals.push("Service status unknown".to_string());
+            error_counter += 1;
+            output(vals, service, error_counter);
+            return;
+        }
+    }
+    output(vals, service, error_counter);
+}
+
+fn output(vals: Vec<String>, service: Vec<String>, error_counter: u8) {
+    // Output Design
+
+    if error_counter > 0 {
+        println!("✗ Service starting failed → {}.service", service[0]);
+    } else {
+        println!("✓ Service starting successed → {}.service", service[0]);
+    }
+
+    for s in 0..vals.len() {
+        println!("   → {}", vals[s]);
+    }
+}
