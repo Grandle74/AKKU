@@ -10,6 +10,7 @@ pub struct ChildProperties {
     pub main_pid: Option<u32>,         // informational
 }
 
+// This implementation provides a constructor for ChildProperties and automatic parsing of properties
 impl ChildProperties {
     pub fn new(service: String) -> Self {
         let mut prop = Self {
@@ -97,73 +98,50 @@ impl ChildProperties {
     }
 }
 
-pub fn start_validation(service: Vec<String>) {
+pub fn start_validation(service: &Vec<String>) -> Result<Vec<String>, Vec<String>> {
     let props = ChildProperties::new(service[0].clone());
     // dbg
     // println!("{:#?}", props);
     let mut vals: Vec<String> = Vec::new();
-    let mut error_counter: u8 = 0;
 
     // 1st Layer
     match props.load_state.as_str() {
         "loaded" => {
             vals.push("Service exists and loaded correctly".to_string());
         }
-        _ => {
-            vals.push("Service doesn't exist".to_string());
-            error_counter += 1;
-            output(vals, service, error_counter);
-            return;
-        }
+        "masked" => return error(vals, "Service is masked"),
+        "error" => return error(vals, "Configuration file has an error"),
+        _ => return error(vals, "Service doesn't exist"),
     }
 
     // Not a Layer
     // Aslong as the service is loaded, the main PID is not None
-    if props.main_pid.is_some() {
-        vals.push(format!("Main PID: {}", props.main_pid.unwrap()));
-    } else {
-        vals.push(format!(
-            "Main PID: {} - not running",
-            props.main_pid.unwrap()
-        ));
-    }
+    vals.push(match &props.main_pid {
+        Some(pid) => format!("Main PID: {}", pid),
+        None => "Main PID: None - not running".to_string(),
+    });
 
     // 2nd Layer
     match props.exec_main_status {
         Some(0) => {}
-        Some(126) => {
-            vals.push("Permission denied".to_string());
-            error_counter += 1;
-            output(vals, service, error_counter);
-            return;
-        }
-        Some(127) => {
-            vals.push("Executable not found".to_string());
-            error_counter += 1;
-            output(vals, service, error_counter);
-            return;
-        }
+        Some(126) => return error(vals, "Permission denied"),
+        Some(127) => return error(vals, "Executable not found"),
         Some(status) if status >= 128 => {
-            vals.push(format!("Service crashed via signal {}", status - 128));
-            error_counter += 1;
-            output(vals, service, error_counter);
-            return;
+            return error(
+                vals,
+                format!("Service crashed via signal {}", status - 128).as_str(),
+            );
         }
         _ => {
             if let Some(petipain) = props.exec_main_status {
-                vals.push(format!("Exec Main Status: {}", petipain));
-                error_counter += 1;
-                output(vals, service, error_counter);
-                return;
+                return error(vals, format!("Exec Main Status: {}", petipain).as_str());
             }
         }
     }
 
     // 3rd Layer
     if props.result.as_str() != "success" {
-        error_counter += 1;
-        output(vals, service, error_counter);
-        return;
+        return Err(vals);
     }
 
     // 4th Layer
@@ -171,18 +149,8 @@ pub fn start_validation(service: Vec<String>) {
         "active" => {
             vals.push("Service is running".to_string());
         }
-        "activating" | "deactivating" => {
-            vals.push("Action stuck - Timeout".to_string());
-            error_counter += 1;
-            output(vals, service, error_counter);
-            return;
-        }
-        _ => {
-            vals.push("Failed to start service".to_string());
-            error_counter += 1;
-            output(vals, service, error_counter);
-            return;
-        }
+        "activating" | "deactivating" => return error(vals, "Action stuck - Timeout"),
+        _ => return error(vals, "Failed to start service"),
     }
 
     // 5th Layer
@@ -190,50 +158,19 @@ pub fn start_validation(service: Vec<String>) {
         "running" => {
             //println!("Service is running")
         }
-        "exited" => {
-            vals.push("Service exited with error".to_string());
-            error_counter += 1;
-            output(vals, service, error_counter);
-            return;
-        }
-        "failed" => {
-            vals.push("Service failed to start".to_string());
-            error_counter += 1;
-            output(vals, service, error_counter);
-            return;
-        }
-        "auto-restart" => {
-            vals.push("Service crashed".to_string());
-            error_counter += 1;
-            output(vals, service, error_counter);
-            return;
-        }
-        "dead" => {
-            vals.push("Service died unexpectedly".to_string());
-            error_counter += 1;
-            output(vals, service, error_counter);
-            return;
-        }
-        _ => {
-            vals.push("Service status unknown".to_string());
-            error_counter += 1;
-            output(vals, service, error_counter);
-            return;
-        }
+        "exited" => return error(vals, "Service exited with error"),
+        "failed" => return error(vals, "Service failed to start"),
+        "auto-restart" => return error(vals, "Service crashed"),
+        "dead" => return error(vals, "Service died unexpectedly"),
+        "inactive" => return error(vals, "Service is inactive"),
+        _ => return error(vals, "Service status unknown"),
     }
-    output(vals, service, error_counter);
+    // If no Error was detected/catched, it will reach here -> Returning Ok() :)
+    return Ok(vals);
 }
 
-fn output(vals: Vec<String>, service: Vec<String>, error_counter: u8) {
-    // Output Design
-
-    if error_counter > 0 {
-        println!("✗ Service starting failed → {}.service", service[0]);
-    } else {
-        println!("✓ Service starting successed → {}.service", service[0]);
-    }
-
-    for s in 0..vals.len() {
-        println!("   → {}", vals[s]);
-    }
+// Returning Error is used multiple times - this will be used to avoid code duplication
+fn error(mut vals: Vec<String>, msg: &str) -> Result<Vec<String>, Vec<String>> {
+    vals.push(msg.to_string());
+    Err(vals)
 }

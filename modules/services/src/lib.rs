@@ -98,13 +98,15 @@ pub fn reset_service() {
 }
 
 // In case of starting failure, this function returns an error message
-pub fn start_service(service: Vec<String>) {
+pub fn start_service(service: &Vec<String>) -> Result<Result<Vec<String>, Vec<String>>, ()> {
     // "child" is the needed execution command
     let child = Command::new("sudo")
         .args(["systemctl", "start", &service[0]])
         .status()
         .expect("Failed to spawn systemctl command");
     if child.success() {
-        error_catcher::start_validation(service);
+        return Ok(error_catcher::start_validation(service));
+    } else {
+        return Err(());
     }
 }

@@ -66,7 +66,7 @@ pub fn service(order: OrderType) {
                 );
             }
             ActionArgs::Start => {
-                services::start_service(more.arguments);
+                action_output(more, "starting");
             }
             ActionArgs::Stop => {
                 services::stop_service(more.arguments);
@@ -87,11 +87,41 @@ pub fn service(order: OrderType) {
     }
 }
 
-/*print!("Enter service name: ");
-io::stdout().flush().unwrap();
-let mut service_name = String::new();
-io::stdin().read_line(&mut service_name).unwrap();
-service_name = service_name.trim().to_string();
-let status = services::service_status(&service_name);
-println!("service status: {}, {}", status[0], status[1]);
+/*
+//  Output Design
+
+if is_error {
+    println!("✗ Service starting failed → {}.service", service[0]);
+} else {
+    println!("✓ Service starting successed → {}.service", service[0]);
+}
+
+for s in 0..vals.len() {
+    println!("   → {}", vals[s]);
+}
 */
+
+fn action_output(more: OrderArgs, action: &str) {
+    let service_name = &more.arguments[0];
+    let result = services::start_service(&more.arguments);
+
+    match result {
+        Err(()) => {
+            // Here we handle Command Error Case
+        }
+        // Every thing goes well here! XD
+        Ok(Ok(vals)) => {
+            println!("✓ Service {} successed → {}.service", action, service_name);
+            for s in 0..vals.len() {
+                println!("   → {}", vals[s]);
+            }
+        }
+        // Here we handle Service Error Case
+        Ok(Err(vals)) => {
+            println!("✗ Service {} failed → {}.service", action, service_name);
+            for s in 0..vals.len() {
+                println!("   → {}", vals[s]);
+            }
+        }
+    }
+}
