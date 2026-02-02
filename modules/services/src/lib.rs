@@ -3,43 +3,85 @@ use std::process::Command;
 //use crate::error_catcher::ChildProperties;
 mod error_catcher;
 
-pub fn status_service(service: Vec<String>) {
+pub fn status_service(args: Option<Vec<String>>) {
+    let args = match args {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            println!("✗ No service name provided");
+            return;
+        }
+    };
     let mut child = Command::new("systemctl")
-        .args(["status", &service[0]])
+        .args(["status", &args[0]])
         .spawn()
         .expect("Failed to spawn systemctl command");
     child.wait().expect("Failed to Wait child");
 }
 
-pub fn reload_service(service: Vec<String>) {
+pub fn reload_service(args: Option<Vec<String>>) {
+    let args = match args {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            println!("✗ No service name provided");
+            return;
+        }
+    };
     Command::new("sudo")
-        .args(["systemctl", "reload-or-restart", &service[0]])
+        .args(["systemctl", "reload-or-restart", &args[0]])
         .status()
         .expect("Failed to run systemctl command");
 }
-pub fn enable_service(service: Vec<String>) {
+pub fn enable_service(args: Option<Vec<String>>) {
+    let args = match args {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            println!("✗ No service name provided");
+            return;
+        }
+    };
     Command::new("sudo")
-        .args(["systemctl", "enable", &service[0]])
+        .args(["systemctl", "enable", &args[0]])
         .status()
         .expect("Failed to run systemctl command");
 }
 
-pub fn disable_service(service: Vec<String>) {
+pub fn disable_service(args: Option<Vec<String>>) {
+    let args = match args {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            println!("✗ No service name provided");
+            return;
+        }
+    };
     Command::new("sudo")
-        .args(["systemctl", "disable", &service[0]])
+        .args(["systemctl", "disable", &args[0]])
         .status()
         .expect("Failed to run systemctl command");
 }
-pub fn mask_service(service: Vec<String>) {
+pub fn mask_service(args: Option<Vec<String>>) {
+    let args = match args {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            println!("✗ No service name provided");
+            return;
+        }
+    };
     Command::new("sudo")
-        .args(["systemctl", "mask", &service[0]])
+        .args(["systemctl", "mask", &args[0]])
         .status()
         .expect("Failed to run systemctl command");
 }
 
-pub fn unmask_service(service: Vec<String>) {
+pub fn unmask_service(args: Option<Vec<String>>) {
+    let args = match args {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            println!("✗ No service name provided");
+            return;
+        }
+    };
     Command::new("sudo")
-        .args(["systemctl", "unmask", &service[0]])
+        .args(["systemctl", "unmask", &args[0]])
         .status()
         .expect("Failed to run systemctl command");
 }
@@ -54,7 +96,7 @@ pub fn list_services() {
 }
 
 pub fn help_service() {
-    println!("Usage: systemctl [command] [service]");
+    println!("if the command is specified to a service, the <service_name> is required");
     println!("Commands:");
     println!("  start     Start a service");
     println!("  stop      Stop a service");
@@ -80,19 +122,31 @@ pub fn reset_service() {
 }
 
 // In case of starting failure, this function returns an error message
-pub fn start_service(service: &Vec<String>) -> Result<Vec<String>, Vec<String>> {
+pub fn start_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
+    let args = match args {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            return Err(vec!["No service Action provided".to_string()]);
+        }
+    };
     // "child" is the needed execution command
     Command::new("sudo")
-        .args(["systemctl", "start", &service[0]])
+        .args(["systemctl", "start", &args[0]])
         .output()
         .expect("Failed to run systemctl command");
-    error_catcher::start_validation(service)
+    error_catcher::start_validation(&args)
 }
 
-pub fn stop_service(service: &Vec<String>) -> Result<Vec<String>, Vec<String>> {
+pub fn stop_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
+    let args = match args {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            return Err(vec!["No service Action provided".to_string()]);
+        }
+    };
     Command::new("sudo")
-        .args(["systemctl", "stop", &service[0]])
+        .args(["systemctl", "stop", &args[0]])
         .output()
         .expect("Failed to run systemctl command");
-    error_catcher::stop_validation(service)
+    error_catcher::stop_validation(&args)
 }
