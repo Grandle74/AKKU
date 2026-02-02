@@ -27,7 +27,8 @@ pub enum ActionArgs {
     Disable,
     Start,
     Stop,
-    Remove,
+    Mask,
+    Unmask,
     Status,
 }
 
@@ -59,20 +60,19 @@ pub fn service(order: OrderType) {
         },
         OrderType::Args(more) => match more.action {
             ActionArgs::Status => {
-                //just debuuging the service_status func..
-                println!(
-                    "service status: {:?}",
-                    services::status_service(more.arguments)
-                );
+                services::status_service(more.arguments);
             }
             ActionArgs::Start => {
                 action_output(more, "starting");
             }
             ActionArgs::Stop => {
-                services::stop_service(more.arguments);
+                action_output(more, "stopping");
             }
-            ActionArgs::Remove => {
-                services::remove_service(more.arguments);
+            ActionArgs::Mask => {
+                services::mask_service(more.arguments);
+            }
+            ActionArgs::Unmask => {
+                services::unmask_service(more.arguments);
             }
             ActionArgs::Enable => {
                 services::enable_service(more.arguments);
@@ -103,21 +103,23 @@ for s in 0..vals.len() {
 
 fn action_output(more: OrderArgs, action: &str) {
     let service_name = &more.arguments[0];
-    let result = services::start_service(&more.arguments);
+    // temporary functionality
+    let result = if action == "starting" {
+        services::start_service(&more.arguments)
+    } else {
+        services::stop_service(&more.arguments)
+    };
 
     match result {
-        Err(()) => {
-            // Here we handle Command Error Case
-        }
         // Every thing goes well here! XD
-        Ok(Ok(vals)) => {
+        Ok(vals) => {
             println!("✓ Service {} successed → {}.service", action, service_name);
             for s in 0..vals.len() {
                 println!("   → {}", vals[s]);
             }
         }
         // Here we handle Service Error Case
-        Ok(Err(vals)) => {
+        Err(vals) => {
             println!("✗ Service {} failed → {}.service", action, service_name);
             for s in 0..vals.len() {
                 println!("   → {}", vals[s]);

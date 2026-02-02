@@ -124,6 +124,7 @@ pub fn start_validation(service: &Vec<String>) -> Result<Vec<String>, Vec<String
     // 2nd Layer
     match props.exec_main_status {
         Some(0) => {}
+        Some(1) => return error(vals, "Service crashed"),
         Some(126) => return error(vals, "Permission denied"),
         Some(127) => return error(vals, "Executable not found"),
         Some(status) if status >= 128 => {
@@ -169,8 +170,91 @@ pub fn start_validation(service: &Vec<String>) -> Result<Vec<String>, Vec<String
     return Ok(vals);
 }
 
+pub fn stop_validation(service: &Vec<String>) -> Result<Vec<String>, Vec<String>> {
+    let props = ChildProperties::new(service[0].clone());
+    // dbg
+    // println!("{:#?}", props);
+    let mut vals: Vec<String> = Vec::new();
+
+    // 1st Layer
+    match props.load_state.as_str() {
+        "loaded" => {
+            vals.push("Service exists and loaded correctly".to_string());
+        }
+        "masked" => {
+            vals.push("Service is masked".to_string());
+        }
+        "error" => return error(vals, "Configuration file has an error"),
+        _ => return error(vals, "Service doesn't exist"),
+    }
+
+    // Not a Layer
+    // Aslong as the service is loaded, the main PID is not None
+    vals.push(match &props.main_pid {
+        Some(pid) => format!("Main PID: {}", pid),
+        None => "Main PID: None - not running".to_string(),
+    });
+
+    // 2nd Layer
+    match props.exec_main_status {
+        Some(0) => {}
+        Some(1) => return error(vals, "Service crashed"),
+        Some(126) => return error(vals, "Permission denied"),
+        Some(127) => return error(vals, "Executable not found"),
+        Some(status) if status >= 128 => {
+            return error(
+                vals,
+                format!("Service crashed via signal {}", status - 128).as_str(),
+            );
+        }
+        _ => {
+            if let Some(petipain) = props.exec_main_status {
+                return error(vals, format!("Exec Main Status: {}", petipain).as_str());
+            }
+        }
+    }
+
+    // 3rd Layer
+    if props.result.as_str() != "success" {
+        return Err(vals);
+    }
+
+    // 4th Layer
+    match props.active_state.as_str() {
+        "inactive" => {
+            vals.push("Service is inactive".to_string());
+        }
+        "activating" | "deactivating" => return error(vals, "Action stuck - Timeout"),
+        _ => return error(vals, "Failed to stop service"),
+    }
+
+    // 5th Layer
+    match props.sub_state.as_str() {
+        "dead" | "inactive" => {
+            // empty since active state tells us that the service is inactive
+        }
+        "exited" => return error(vals, "Service exited with error"),
+        "failed" => return error(vals, "Service failed to stop"),
+        "auto-restart" => return error(vals, "Service crashed earlier"),
+        "running" => return error(vals, "Service is unexpectedly running"),
+
+        _ => return error(vals, "Service status unknown"),
+    }
+    // If no Error was detected/catched, it will reach here -> Returning Ok() :)
+    return Ok(vals);
+}
+
 // Returning Error is used multiple times - this will be used to avoid code duplication
 fn error(mut vals: Vec<String>, msg: &str) -> Result<Vec<String>, Vec<String>> {
     vals.push(msg.to_string());
     Err(vals)
 }
+// Also, Could use a Micro:
+/*
+macro_rules! fail {
+    ($vals:expr, $msg:expr) => {{
+        $vals.push($msg.to_string());
+        return Err($vals);
+    }};
+}
+*/
