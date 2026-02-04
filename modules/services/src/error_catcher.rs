@@ -2,6 +2,7 @@ use std::process::Command;
 
 #[derive(Debug)]
 pub struct ChildProperties {
+    // IDK WHAT ARE THESE COMMENTS X)
     pub load_state: String,            // preflight only
     pub active_state: String,          // required
     pub sub_state: String,             // required
@@ -244,12 +245,36 @@ pub fn stop_validation(service: &Vec<String>) -> Result<Vec<String>, Vec<String>
     return Ok(vals);
 }
 
+pub fn mask_validation(service: &str, expect_masked: bool) -> Result<Vec<String>, Vec<String>> {
+    let output = Command::new("systemctl")
+        .args(["is-enabled", service])
+        .output()
+        .expect("Failed to check status");
+
+    let state = String::from_utf8(output.stdout)
+        .expect("Failed to convert output to string")
+        .trim()
+        .to_string();
+
+    let is_masked = state == "masked";
+
+    if is_masked == expect_masked {
+        Ok(vec![format!("Current state: {}", state)])
+    } else {
+        Err(vec![if expect_masked {
+            format!("Masking failed, current state: {}", state)
+        } else {
+            "Still masked".to_string()
+        }])
+    }
+}
+
 // Returning Error is used multiple times - this will be used to avoid code duplication
-fn error(mut vals: Vec<String>, msg: &str) -> Result<Vec<String>, Vec<String>> {
-    vals.push(msg.to_string());
+fn error(mut vals: Vec<String>, push_last_message: &str) -> Result<Vec<String>, Vec<String>> {
+    vals.push(push_last_message.to_string());
     Err(vals)
 }
-// Also, Could use a Micro:
+// Also, Could use a Macro:
 /*
 macro_rules! fail {
     ($vals:expr, $msg:expr) => {{

@@ -62,31 +62,103 @@ pub fn disable_service(args: Option<Vec<String>>) {
         .expect("Failed to run systemctl command");
 }
 
-pub fn mask_service(args: Option<Vec<String>>) {
-    let Some(service) = get_service_name(&args) else {
-        println!("✗ No service name provided");
-        return;
-    };
-
-    Command::new("sudo")
-        .args(["systemctl", "mask", service])
-        .status()
-        .expect("Failed to run systemctl command");
-}
-
-pub fn unmask_service(args: Option<Vec<String>>) {
-    let Some(service) = get_service_name(&args) else {
-        println!("✗ No service name provided");
-        return;
-    };
-
-    Command::new("sudo")
-        .args(["systemctl", "unmask", service])
-        .status()
-        .expect("Failed to run systemctl command");
-}
-
 // Currently, Just these which catch services errors
+
+pub fn mask_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
+    let Some(service) = get_service_name(args) else {
+        return Err(vec!["No service name provided".to_string()]);
+    };
+
+    // Check if service exists BEFORE attempting unmask
+    let check_output = Command::new("systemctl")
+        .args(["is-enabled", service])
+        .output()
+        .expect("Failed to check service");
+
+    let state = String::from_utf8_lossy(&check_output.stdout)
+        .trim()
+        .to_string();
+
+    // If service doesn't exist, return error early
+    if state == "not-found" || (!check_output.status.success() && state.is_empty()) {
+        return Err(vec!["Service doesn't exist".to_string()]);
+    }
+
+    // No need to check if service is masked, as masking will succeed regardless
+    // If service exists, proceed with masking
+    let Some(service) = get_service_name(args) else {
+        return Err(vec!["No service name provided".to_string()]);
+    };
+
+    let output = Command::new("sudo")
+        .args(["systemctl", "mask", service])
+        .output()
+        .expect("Failed to run systemctl command");
+
+    // Get stderr messages (systemd's weird default is stderr!?)
+    let stderr_lines: Vec<String> = String::from_utf8_lossy(&output.stderr)
+        .trim()
+        .lines()
+        .map(|s| s.to_string())
+        .collect();
+
+    // Check exit code to determine success/failure
+    if output.status.success() {
+        // Success - stderr contains info messages
+        let mut result = error_catcher::mask_validation(service, true)?;
+        result.extend(stderr_lines);
+        Ok(result)
+    } else {
+        // Failure - stderr contains error messages
+        error_catcher::mask_validation(service, true)
+    }
+}
+
+pub fn unmask_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
+    let Some(service) = get_service_name(args) else {
+        return Err(vec!["No service name provided".to_string()]);
+    };
+
+    // Check if service exists BEFORE attempting unmask
+    let check_output = Command::new("systemctl")
+        .args(["is-enabled", service])
+        .output()
+        .expect("Failed to check service");
+
+    let state = String::from_utf8_lossy(&check_output.stdout)
+        .trim()
+        .to_string();
+
+    // If service doesn't exist, return error early
+    if state == "not-found" || (!check_output.status.success() && state.is_empty()) {
+        return Err(vec!["Service doesn't exist".to_string()]);
+    }
+
+    // If service exists, proceed with unmasking
+    // No need to check if service is unmasked, as unmasking will succeed regardless
+    let Some(service) = get_service_name(args) else {
+        return Err(vec!["No service name provided".to_string()]);
+    };
+
+    let output = Command::new("sudo")
+        .args(["systemctl", "unmask", service])
+        .output()
+        .expect("Failed to run systemctl command");
+
+    let stderr_lines: Vec<String> = String::from_utf8_lossy(&output.stderr)
+        .trim()
+        .lines()
+        .map(|s| s.to_string())
+        .collect();
+
+    if output.status.success() {
+        let mut result = error_catcher::mask_validation(service, false)?;
+        result.extend(stderr_lines);
+        Ok(result)
+    } else {
+        error_catcher::mask_validation(service, false)
+    }
+}
 
 pub fn start_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
     let Some(service) = get_service_name(args) else {
