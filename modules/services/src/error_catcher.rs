@@ -12,6 +12,7 @@ pub struct ChildProperties {
 }
 
 // This implementation provides a constructor for ChildProperties and automatic parsing of properties
+// Used by start_validation() and stop_validation() functions
 impl ChildProperties {
     pub fn new(service: String) -> Self {
         let mut prop = Self {
@@ -29,6 +30,7 @@ impl ChildProperties {
 
     fn prop_parser(&mut self, service: String) {
         // This adds a small delay to let systemd update the status -- it's the only solution
+        println!("Parsing properties for service: {}...", service);
         std::thread::sleep(std::time::Duration::from_millis(3000));
         // "child_status" is the needed status of the child command to catch error efficiently
         let child_status = Command::new("systemctl")
@@ -99,6 +101,40 @@ impl ChildProperties {
     }
 }
 
+/// Helper: Extract service name from arguments
+pub fn get_service_name(args: &Option<Vec<String>>) -> Option<&str> {
+    args.as_ref().and_then(|a| {
+        if !a.is_empty() {
+            Some(a[0].as_str())
+        } else {
+            None
+        }
+    })
+}
+
+/// Generic validation functions
+pub fn validate_service_name(args: &Option<Vec<String>>) -> Result<&str, Vec<String>> {
+    match get_service_name(args) {
+        Some(name) => Ok(name),
+        None => Err(vec!["No service name provided".to_string()]),
+    }
+}
+pub fn validate_service_exists(service: &str) -> Result<(), Vec<String>> {
+    let output = Command::new("systemctl")
+        .args(["is-enabled", service])
+        .output()
+        .expect("Failed to check service");
+
+    let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if state == "not-found" || (!output.status.success() && state.is_empty()) {
+        Err(vec!["Service doesn't exist".to_string()])
+    } else {
+        Ok(())
+    }
+}
+
+/// Specific validation functions
 pub fn start_validation(service: &Vec<String>) -> Result<Vec<String>, Vec<String>> {
     let props = ChildProperties::new(service[0].clone());
     // dbg
@@ -266,6 +302,32 @@ pub fn mask_validation(service: &str, expect_masked: bool) -> Result<Vec<String>
         } else {
             "Still masked".to_string()
         }])
+    }
+}
+
+pub fn enable_disable_validation(
+    service: &str,
+    expect_enabled: bool,
+) -> Result<Vec<String>, Vec<String>> {
+    let output = Command::new("systemctl")
+        .args(["is-enabled", service])
+        .output()
+        .expect("Failed to check status");
+
+    let state = String::from_utf8(output.stdout)
+        .expect("Failed to convert output to string")
+        .trim()
+        .to_string();
+
+    match state.as_str() {
+        "enabled" if expect_enabled => Ok(vec![format!("Current state: {}", state)]),
+        "disabled" if !expect_enabled => Ok(vec![format!("Current state: {}", state)]),
+        "masked" => Err(vec!["Service is masked".to_string()]),
+        "static" => Err(vec![
+            "Service is static - cannot be enabled/disabled".to_string(),
+        ]),
+        "not-found" => Err(vec!["Service doesn't exist".to_string()]),
+        _ => Err(vec![format!("Current state: {}", state)]),
     }
 }
 

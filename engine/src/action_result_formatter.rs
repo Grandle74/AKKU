@@ -18,8 +18,8 @@ pub fn action_output(order: Order, action: &str) {
         "stopping" => services::stop_service(&order.arguments),
         "masking" => services::mask_service(&order.arguments),
         "unmasking" => services::unmask_service(&order.arguments),
-        //"enabling" => services::enable_service(&order.arguments),
-        //"disabling" => services::disable_service(&order.arguments),
+        "enabling" => services::enable_service(&order.arguments),
+        "disabling" => services::disable_service(&order.arguments),
         //"reloading" => services::reload_service(&order.arguments),
         _ => Err(vec!["Invalid action".to_string()]),
     };

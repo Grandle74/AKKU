@@ -45,8 +45,8 @@ fn execute_service_order(order: Order) {
         Action::Stop => action_result_formatter::action_output(order, "stopping"),
         Action::Mask => action_result_formatter::action_output(order, "masking"),
         Action::Unmask => action_result_formatter::action_output(order, "unmasking"),
-        Action::Enable => services::enable_service(order.arguments),
-        Action::Disable => services::disable_service(order.arguments),
+        Action::Enable => action_result_formatter::action_output(order, "enabling"),
+        Action::Disable => action_result_formatter::action_output(order, "disabling"),
         Action::Reload => services::reload_service(order.arguments),
     }
 }
