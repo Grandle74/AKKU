@@ -39,14 +39,14 @@ fn execute_service_order(order: Order) {
     match order.action {
         Action::List => services::list_services(),
         Action::Help => services::help_service(),
-        Action::Reset => action_result_formatter::action_output(order, "resetting"),
         Action::Status => services::status_service(order.arguments),
+        Action::Reset => action_result_formatter::action_output(order, "resetting"),
         Action::Start => action_result_formatter::action_output(order, "starting"),
         Action::Stop => action_result_formatter::action_output(order, "stopping"),
         Action::Mask => action_result_formatter::action_output(order, "masking"),
         Action::Unmask => action_result_formatter::action_output(order, "unmasking"),
         Action::Enable => action_result_formatter::action_output(order, "enabling"),
         Action::Disable => action_result_formatter::action_output(order, "disabling"),
-        Action::Reload => services::reload_service(order.arguments),
+        Action::Reload => action_result_formatter::action_output(order, "reloading"),
     }
 }

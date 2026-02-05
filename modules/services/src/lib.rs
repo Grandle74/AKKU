@@ -31,19 +31,21 @@ pub fn status_service(args: Option<Vec<String>>) {
     child.wait().expect("Failed to wait for child");
 }
 
-pub fn reload_service(args: Option<Vec<String>>) {
-    let Some(service) = error_catcher::get_service_name(&args) else {
-        println!("✗ No service name provided");
-        return;
-    };
+/// Currently, Just these Actions which returns services errors
+
+pub fn reload_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
+    // Check if exists BEFORE attempting Action
+    let service = error_catcher::validate_service_name(&args)?;
+    error_catcher::validate_service_exists(service)?;
 
     Command::new("sudo")
         .args(["systemctl", "reload-or-restart", service])
         .status()
         .expect("Failed to run systemctl command");
+
+    error_catcher::start_validation(args.as_ref().unwrap())
 }
 
-/// Currently, Just these Actions which returns services errors
 pub fn disable_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
     // Check if exists BEFORE attempting Action
     let service = error_catcher::validate_service_name(&args)?;

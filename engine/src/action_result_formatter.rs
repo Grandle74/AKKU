@@ -44,7 +44,7 @@ pub fn action_output(order: Order, action: &str) {
         "unmasking" => services::unmask_service(&order.arguments),
         "enabling" => services::enable_service(&order.arguments),
         "disabling" => services::disable_service(&order.arguments),
-        //"reloading" => services::reload_service(&order.arguments),
+        "reloading" => services::reload_service(&order.arguments),
         _ => {
             println!("✗ Unknown action: {}", action);
             return;
