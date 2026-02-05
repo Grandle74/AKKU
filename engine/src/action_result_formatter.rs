@@ -1,13 +1,26 @@
-use super::Order;
-
-// Action Output should be turned to ActionOutputFormatter
-// This is a temporary solution until we have a proper formatter
-// Proper formatter will be needed when Engine gets ready
+use crate::Order;
+use std::time::Instant;
 
 pub fn action_output(order: Order, action: &str) {
-    // Handle special case: reset doesn't need service name
+    let start_time = Instant::now();
+
+    // Create log entry
+    let domain = "service";
+    let target = match &order.arguments {
+        Some(args) if !args.is_empty() => &args[0],
+        _ => "unknown",
+    };
+
+    let mut log = logger::OperationLog::new(domain, action, target);
+
+    // Handle special case: reset
     if action == "resetting" {
         let result = services::reset_service();
+        let duration = start_time.elapsed().as_millis() as u64;
+
+        log = log.finish(result.clone(), duration);
+        let _ = log.save();
+
         match result {
             Ok(vals) => {
                 println!("✓ Service {} succeeded", action);
@@ -25,18 +38,21 @@ pub fn action_output(order: Order, action: &str) {
         return;
     }
 
-    // Handle the case where arguments might be None or empty
-    let arguments = match &order.arguments {
-        Some(args) if !args.is_empty() => args,
+    // Handle normal actions
+    let service_name = match &order.arguments {
+        Some(args) if !args.is_empty() => &args[0],
         _ => {
             println!("✗ Service {} failed → No service name provided", action);
+            let result: Result<Vec<String>, Vec<String>> =
+                Err(vec!["No service name provided".to_string()]);
+            let duration = start_time.elapsed().as_millis() as u64;
+            log = log.finish(result, duration);
+            let _ = log.save();
             return;
         }
     };
 
-    let service_name = &arguments[0];
-
-    // Execute the appropriate action
+    // Execute action
     let result = match action {
         "starting" => services::start_service(&order.arguments),
         "stopping" => services::stop_service(&order.arguments),
@@ -44,14 +60,21 @@ pub fn action_output(order: Order, action: &str) {
         "unmasking" => services::unmask_service(&order.arguments),
         "enabling" => services::enable_service(&order.arguments),
         "disabling" => services::disable_service(&order.arguments),
+<<<<<<< HEAD
         "reloading" => services::reload_service(&order.arguments),
+=======
+>>>>>>> 09dc1d6 (Added "Logger Crate/Module" which saves the performed Action Resualts into two files in "~/.yast3" - currently specified just to Service Module)
         _ => {
             println!("✗ Unknown action: {}", action);
             return;
         }
     };
 
-    // Format output based on result
+    let duration = start_time.elapsed().as_millis() as u64;
+    log = log.finish(result.clone(), duration);
+    let _ = log.save();
+
+    // Format output
     match result {
         Ok(vals) => {
             println!("✓ Service {} succeeded → {}.service", action, service_name);

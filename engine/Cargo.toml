@@ -8,3 +8,4 @@ edition = "2024"
 #network = { path = "../modules/network" }
 #package = { path = "../modules/package" }
 services = { path = "../modules/services" }
+logger = { path = "../modules/logger" }

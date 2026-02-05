@@ -1,8 +1,10 @@
 [workspace]
+resolver = "3"
 members = [
     "cli",
     "api",
     "engine",
-    "modules/services"
+    "modules/services",
+    "modules/logger",
 ]
 default-members = ["cli"]
