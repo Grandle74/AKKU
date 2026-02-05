@@ -173,12 +173,31 @@ pub fn help_service() {
     println!("  status    Show the status of a service");
 }
 
-pub fn reset_service() {
+pub fn reset_service() -> Result<Vec<String>, Vec<String>> {
+    // Get list of failed services BEFORE reset
+    let failed_services = Command::new("systemctl")
+        .args(["list-units", "--failed", "--no-legend", "--plain"])
+        .output()
+        .expect("Failed to get failed services");
+
+    let failed_services: Vec<String> = String::from_utf8_lossy(&failed_services.stdout)
+        .lines()
+        .filter_map(|line| {
+            // Extract service name (first column)
+            line.split_whitespace().next().map(|s| s.to_string())
+        })
+        .collect();
+
+    // Run reset command
     Command::new("sudo")
         .args(["systemctl", "reset-failed"])
         .status()
         .expect("Failed to run systemctl command");
-    println!(
-        "Add a report for which services were reset - Lazy Coder!\nBtw, Reset was done successfully..."
-    );
+
+    // Return list of reset services
+    if failed_services.is_empty() {
+        Ok(vec!["No failed services to reset".to_string()])
+    } else {
+        Ok(failed_services)
+    }
 }

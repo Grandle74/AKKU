@@ -39,7 +39,7 @@ fn execute_service_order(order: Order) {
     match order.action {
         Action::List => services::list_services(),
         Action::Help => services::help_service(),
-        Action::Reset => services::reset_service(),
+        Action::Reset => action_result_formatter::action_output(order, "resetting"),
         Action::Status => services::status_service(order.arguments),
         Action::Start => action_result_formatter::action_output(order, "starting"),
         Action::Stop => action_result_formatter::action_output(order, "stopping"),
