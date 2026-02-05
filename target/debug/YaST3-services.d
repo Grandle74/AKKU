@@ -1,1 +1,0 @@
-/home/grandle/rust-projects/YaST3-services_prototype/target/debug/YaST3-services: /home/grandle/rust-projects/YaST3-services_prototype/src/api.rs /home/grandle/rust-projects/YaST3-services_prototype/src/main.rs /home/grandle/rust-projects/YaST3-services_prototype/src/modules/services.rs
