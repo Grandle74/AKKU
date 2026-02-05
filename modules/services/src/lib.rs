@@ -3,17 +3,32 @@ use std::process::Command;
 mod error_catcher;
 
 // this function prints, it needs to return instead!
+// (will work on it in the future when needed, in shaa' allah)
 pub fn status_service(args: Option<Vec<String>>) {
-    let Some(service) = error_catcher::get_service_name(&args) else {
-        println!("✗ No service name provided");
-        return;
+    let service = match error_catcher::validate_service_name(&args) {
+        Ok(s) => s,
+        Err(errs) => {
+            for err in errs {
+                println!("✗ {}", err);
+            }
+            return;
+        }
     };
 
+    if let Err(errs) = error_catcher::validate_service_exists(service) {
+        for err in errs {
+            println!("✗ {}", err);
+        }
+        return;
+    }
+
+    // Just run and display - no capturing needed
     let mut child = Command::new("systemctl")
         .args(["status", service])
         .spawn()
         .expect("Failed to spawn systemctl command");
-    child.wait().expect("Failed to Wait child");
+
+    child.wait().expect("Failed to wait for child");
 }
 
 pub fn reload_service(args: Option<Vec<String>>) {
@@ -28,6 +43,7 @@ pub fn reload_service(args: Option<Vec<String>>) {
         .expect("Failed to run systemctl command");
 }
 
+/// Currently, Just these Actions which returns services errors
 pub fn disable_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
     // Check if exists BEFORE attempting Action
     let service = error_catcher::validate_service_name(&args)?;
@@ -46,7 +62,6 @@ pub fn disable_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<St
     }
 }
 
-// Currently, Just these which catch services errors
 pub fn enable_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
     // Check if exists BEFORE attempting Action
     let service = error_catcher::validate_service_name(&args)?;
@@ -147,8 +162,7 @@ pub fn stop_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<Strin
     error_catcher::stop_validation(args.as_ref().unwrap())
 }
 
-// No Argument Functions:
-
+/// No Argument Actions
 pub fn list_services() {
     let mut child = Command::new("sh")
         .args(["-c", "systemctl list-units --type=service"])
