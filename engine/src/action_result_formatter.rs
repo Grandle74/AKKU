@@ -60,10 +60,6 @@ pub fn action_output(order: Order, action: &str) {
         "unmasking" => services::unmask_service(&order.arguments),
         "enabling" => services::enable_service(&order.arguments),
         "disabling" => services::disable_service(&order.arguments),
-<<<<<<< HEAD
-        "reloading" => services::reload_service(&order.arguments),
-=======
->>>>>>> 09dc1d6 (Added "Logger Crate/Module" which saves the performed Action Resualts into two files in "~/.yast3" - currently specified just to Service Module)
         _ => {
             println!("✗ Unknown action: {}", action);
             return;

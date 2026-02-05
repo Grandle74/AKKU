@@ -1,17 +1,1 @@
-error: failed to load manifest for workspace member `/home/grandle/rust-projects/YaST3-services_prototype/cli`
-referenced by workspace at `/home/grandle/rust-projects/YaST3-services_prototype/Cargo.toml`
-
-Caused by:
-  failed to load manifest for dependency `api`
-
-Caused by:
-  failed to load manifest for dependency `engine`
-
-Caused by:
-  failed to load manifest for dependency `logger`
-
-Caused by:
-  failed to read `/home/grandle/rust-projects/YaST3-services_prototype/modules/logger/Cargo.toml`
-
-Caused by:
-  No such file or directory (os error 2)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
