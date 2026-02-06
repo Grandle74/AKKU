@@ -1,11 +1,15 @@
-use crate::Order;
+use crate::{Domain, Order};
 use std::time::Instant;
 
 pub fn action_output(order: Order, action: &str) {
     let start_time = Instant::now();
 
     // Create log entry
-    let domain = "service";
+    let domain = match order.domain {
+        Domain::Services => "service",
+        // Domain::Network => "network",  // future
+        // Domain::User => "user",        // future
+    };
     let target = match &order.arguments {
         Some(args) if !args.is_empty() => &args[0],
         _ => "unknown",
