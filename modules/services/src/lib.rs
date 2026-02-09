@@ -1,5 +1,6 @@
 use std::process::Command;
 
+pub mod current_state;
 mod error_catcher;
 
 // this function prints, it needs to return instead!

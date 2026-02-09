@@ -338,3 +338,86 @@ This prototype borrows ideas from:
 **⚠️ Prototype Status**: This is an early research prototype built for learning and validation. It makes real system changes but lacks production safeguards. Use in VMs or containers only.
 
 **Feedback welcome**: If you spot something broken, naive, or interesting, I'd love to hear about it.
+
+// draft
+/*
+```
+
+---
+
+## What This Gives You:
+
+### NOW (Prototype):
+```
+User: service start nginx
+API: Order { action: Start, target: nginx }
+Engine:
+  ├─ Plan: [Step: Start nginx]
+  ├─ Execute: start_service()
+  └─ (No rollback needed if success)
+```
+
+### LATER (Real System):
+```
+User: nginx should be running + enabled
+API: Order { desired: {running: true, enabled: true} }
+Engine:
+  ├─ Check current state
+  ├─ Plan: [Step1: Enable nginx, Step2: Start nginx]
+  ├─ Dry run: "Will enable nginx, then start it"
+  ├─ Execute both steps
+  └─ Rollback: [Disable nginx, Stop nginx] if failed
+```
+
+**Same engine structure, just smarter planner!**
+
+---
+
+## Today's Work (if you have energy):
+
+### Option 1: Just Structure (30 mins)
+Create the files with empty/simple functions:
+```
+engine/
+├─ mod.rs        (your current execute_order)
+├─ planner.rs    (empty struct for now)
+├─ executor.rs   (empty struct for now)
+└─ rollback.rs   (empty struct for now)
+
+User: "nginx should be running and enabled"
+
+
+Example of the Planner:
+Current State (queried):
+  - nginx: stopped, disabled
+
+Desired State (from Order):
+  - nginx: running, enabled
+
+Difference:
+  - needs to be enabled
+  - needs to be started
+
+Generated Plan:
+  Step 1: Enable nginx
+  Step 2: Start nginx
+
+Rollback Plan (paired):
+  Step 1 rollback: Disable nginx
+  Step 2 rollback: Stop nginx
+
+Frontend
+  ↓
+API (validates)
+  ↓
+Engine (plans, snapshots)
+  ├─ Planner: create_plan(from_state, to_state)
+  ├─ Snapshots: save/load states
+  └─ Executor: run plans
+     ↓
+Modules (query state, execute actions)
+  ├─ services::get_current_state()  ← calls systemctl
+  ├─ services::start_service()      ← calls systemctl
+  └─ services::enable_service()     ← calls systemctl
+     ↓
+System Tools (systemctl, etc.)
