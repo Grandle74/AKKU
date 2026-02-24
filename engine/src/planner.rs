@@ -1,35 +1,32 @@
-use crate::{Action, Domain, Order};
+// engine/src/planner.rs
+use crate::{Action, Domain, Order, PropertyValue};
 use services::current_state::ServiceState;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Step {
-    domain: Domain,
-    action: Action,
-    target: String,
-    description: String,
+    pub domain: Domain,
+    pub action: Action,
+    pub target: String,
+    pub description: String,
 }
 
-pub fn create_plan(order: Order) -> Result<Vec<Step>, String> {
-    let target = order.arguments.as_ref().unwrap()[0].clone();
-    // Get the current state of the System/Target
-    let current_state = ServiceState::new(&target)?;
+pub struct ExecutionPlan {
+    pub steps: Vec<Step>,
+}
 
-    // Get the Desired State given by Order
-    // Currently is not Declarative - Needs Update after API changes
-    let desired_state = ServiceState {
-        name: target.clone(),
-        active: true,
-        enabled: true,
-        masked: true,
-    };
+pub fn create_plan(order: Order) -> Result<ExecutionPlan, String> {
+    match order.domain {
+        Domain::Services => create_service_plan(&order),
+    }
+}
 
-    // Calculate the difference between the current and desired states
-    let diff = StateDiff::calculate_diff(&current_state, &desired_state);
+fn create_service_plan(order: &Order) -> Result<ExecutionPlan, String> {
+    let current = ServiceState::new(&order.target)?;
+    let diff = calculate_diff(&current, &order.desired_properties);
+    let steps = generate_steps(&diff, &order.target, order.domain.clone());
 
-    // Future: needs to be updated after API Declarative changes
-    let steps = generate_steps(&diff, &target, order.domain);
-
-    Ok(steps)
+    Ok(ExecutionPlan { steps })
 }
 
 struct StateDiff {
@@ -41,26 +38,26 @@ struct StateDiff {
     needs_unmask: bool,
 }
 
-impl StateDiff {
-    pub fn calculate_diff(current: &ServiceState, desired: &ServiceState) -> StateDiff {
+fn calculate_diff(current: &ServiceState, desired: &HashMap<String, PropertyValue>) -> StateDiff {
+    if current.masked {
+        // Should return an error result -- needs to be fixed
+        // This also doesn't allow unmasking and enabling/starting/stopping/disabling in the same time - another issue
         StateDiff {
-            // Need to start if: desired=active but current=inactive
-            needs_start: desired.active && !current.active,
-
-            // Need to stop if: desired=inactive but current=active
-            needs_stop: !desired.active && current.active,
-
-            // Need to enable if: desired=enabled but current=disabled
-            needs_enable: desired.enabled && !current.enabled && !current.masked,
-
-            // Need to disable if: desired=disabled but current=enabled
-            needs_disable: !desired.enabled && current.enabled,
-
-            // Need to mask if: desired=masked but current=not masked
-            needs_mask: desired.masked && !current.masked,
-
-            // Need to unmask if: desired=not masked but current=masked
-            needs_unmask: !desired.masked && current.masked,
+            needs_start: false,
+            needs_stop: false,
+            needs_enable: false,
+            needs_disable: false,
+            needs_mask: get_bool(desired, "masked") == Some(true) && !current.masked,
+            needs_unmask: get_bool(desired, "masked") == Some(false) && current.masked,
+        }
+    } else {
+        StateDiff {
+            needs_start: get_bool(desired, "running") == Some(true) && !current.active,
+            needs_stop: get_bool(desired, "running") == Some(false) && current.active,
+            needs_enable: get_bool(desired, "enabled") == Some(true) && !current.enabled,
+            needs_disable: get_bool(desired, "enabled") == Some(false) && current.enabled,
+            needs_mask: get_bool(desired, "masked") == Some(true) && !current.masked,
+            needs_unmask: get_bool(desired, "masked") == Some(false) && current.masked,
         }
     }
 }
@@ -68,30 +65,21 @@ impl StateDiff {
 fn generate_steps(diff: &StateDiff, service: &str, domain: Domain) -> Vec<Step> {
     let mut steps = Vec::new();
 
-    // Order matters! Unmask before enable, enable before start...
+    // Order matters! Unmask before enable, enable before start
 
     if diff.needs_unmask {
         steps.push(Step {
             domain: domain.clone(),
-            action: Action::Mask(false),
+            action: Action::Unmask,
             target: service.to_string(),
             description: format!("Unmask {}", service),
-        });
-    }
-
-    if diff.needs_mask {
-        steps.push(Step {
-            domain: domain.clone(),
-            action: Action::Mask(true),
-            target: service.to_string(),
-            description: format!("Mask {}", service),
         });
     }
 
     if diff.needs_enable {
         steps.push(Step {
             domain: domain.clone(),
-            action: Action::Enable(true),
+            action: Action::Enable,
             target: service.to_string(),
             description: format!("Enable {}", service),
         });
@@ -100,7 +88,7 @@ fn generate_steps(diff: &StateDiff, service: &str, domain: Domain) -> Vec<Step> 
     if diff.needs_disable {
         steps.push(Step {
             domain: domain.clone(),
-            action: Action::Enable(false),
+            action: Action::Disable,
             target: service.to_string(),
             description: format!("Disable {}", service),
         });
@@ -109,7 +97,7 @@ fn generate_steps(diff: &StateDiff, service: &str, domain: Domain) -> Vec<Step> 
     if diff.needs_start {
         steps.push(Step {
             domain: domain.clone(),
-            action: Action::Start(true),
+            action: Action::Start,
             target: service.to_string(),
             description: format!("Start {}", service),
         });
@@ -118,11 +106,27 @@ fn generate_steps(diff: &StateDiff, service: &str, domain: Domain) -> Vec<Step> 
     if diff.needs_stop {
         steps.push(Step {
             domain: domain.clone(),
-            action: Action::Start(false),
+            action: Action::Stop,
             target: service.to_string(),
             description: format!("Stop {}", service),
         });
     }
 
+    if diff.needs_mask {
+        steps.push(Step {
+            domain: domain.clone(),
+            action: Action::Mask,
+            target: service.to_string(),
+            description: format!("Mask {}", service),
+        });
+    }
+
     steps
+}
+
+fn get_bool(props: &HashMap<String, PropertyValue>, key: &str) -> Option<bool> {
+    match props.get(key) {
+        Some(PropertyValue::Bool(b)) => Some(*b),
+        _ => None,
+    }
 }

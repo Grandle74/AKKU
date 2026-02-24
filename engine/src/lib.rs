@@ -1,56 +1,100 @@
+// engine/src/lib.rs
+use std::collections::HashMap;
+
 mod action_result_formatter;
 mod planner;
 
 #[derive(Debug, Clone)]
 pub enum Domain {
     Services,
+    // Future: Network, Users, etc.
 }
-#[derive(Clone)]
+
+#[derive(Clone, Debug)]
 pub struct Order {
     pub domain: Domain,
-    pub action: Action,
-    pub arguments: Option<Vec<String>>,
+    pub target: String,
+    pub desired_properties: HashMap<String, PropertyValue>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PropertyValue {
+    Bool(bool),
+    String(String),
+    Number(i64),
 }
 
 #[derive(Debug, Clone)]
 pub enum Action {
-    // boolean is used in the way: Start(true) = Start / Start(false) = Stop
+    Start,
+    Stop,
+    Enable,
+    Disable,
+    Mask,
+    Unmask,
     Reload,
-    Enable(bool),
-    Start(bool),
-    Mask(bool),
     Status,
     List,
     Help,
     Reset,
 }
 
-/// Main engine entry point - the ONLY public function
-pub fn execute_order(order: Order) {
+pub fn execute_order(order: &Order) {
     match order.domain {
         Domain::Services => execute_service_order(order),
-        // Future:
-        // Domain::Network => execute_network_order(order),
-        // Domain::User => execute_user_order(order),
     }
 }
 
-/// Internal: Handle service domain orders
-fn execute_service_order(order: Order) {
-    // DBG
-    println!("Plan is:\n{:?}", planner::create_plan(order.clone()));
+fn execute_service_order(order: &Order) {
+    // Check if meta action (no state changes)
+    // FIXED: Check both target AND empty properties
+    let is_meta = order.target == "list" || order.target == "help" || order.target == "reset";
 
-    match order.action {
-        Action::List => services::list_services(),
-        Action::Help => services::help_service(),
-        Action::Status => services::status_service(order.arguments),
-        Action::Reset => action_result_formatter::action_output(order, "resetting"),
-        Action::Start(true) => action_result_formatter::action_output(order, "starting"),
-        Action::Start(false) => action_result_formatter::action_output(order, "stopping"),
-        Action::Mask(true) => action_result_formatter::action_output(order, "masking"),
-        Action::Mask(false) => action_result_formatter::action_output(order, "unmasking"),
-        Action::Enable(true) => action_result_formatter::action_output(order, "enabling"),
-        Action::Enable(false) => action_result_formatter::action_output(order, "disabling"),
+    if is_meta || order.desired_properties.is_empty() {
+        match order.target.as_str() {
+            "list" => services::list_services(),
+            "help" => services::help_service(),
+            "reset" => action_result_formatter::action_output(order, "resetting"),
+            _ => {
+                // This is "status" - pass the target as argument
+                services::status_service(Some(vec![order.target.clone()]))
+            }
+        }
+        return;
+    }
+
+    // Create and execute plan
+    match planner::create_plan(order.clone()) {
+        Ok(plan) => {
+            if plan.steps.is_empty() {
+                println!("✓ No changes needed - service already in desired state");
+                return;
+            }
+
+            println!("=== Execution Plan ===");
+            for (i, step) in plan.steps.iter().enumerate() {
+                println!("{}. {}", i + 1, step.description);
+            }
+            println!();
+
+            // Execute each step
+            for step in &plan.steps {
+                execute_step(step, order);
+            }
+        }
+        Err(e) => println!("✗ Planning failed: {}", e),
+    }
+}
+
+fn execute_step(step: &planner::Step, order: &Order) {
+    match step.action {
+        Action::Start => action_result_formatter::action_output(order, "starting"),
+        Action::Stop => action_result_formatter::action_output(order, "stopping"),
+        Action::Enable => action_result_formatter::action_output(order, "enabling"),
+        Action::Disable => action_result_formatter::action_output(order, "disabling"),
+        Action::Mask => action_result_formatter::action_output(order, "masking"),
+        Action::Unmask => action_result_formatter::action_output(order, "unmasking"),
         Action::Reload => action_result_formatter::action_output(order, "reloading"),
+        _ => {}
     }
 }
