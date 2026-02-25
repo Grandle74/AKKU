@@ -13,6 +13,7 @@ pub enum Domain {
 #[derive(Clone, Debug)]
 pub struct Order {
     pub domain: Domain,
+    pub action: Action,
     pub target: String,
     pub desired_properties: HashMap<String, PropertyValue>,
 }
@@ -24,7 +25,7 @@ pub enum PropertyValue {
     Number(i64),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     Start,
     Stop,
@@ -37,6 +38,7 @@ pub enum Action {
     List,
     Help,
     Reset,
+    Config,
 }
 
 pub fn execute_order(order: &Order) {
@@ -45,44 +47,57 @@ pub fn execute_order(order: &Order) {
     }
 }
 
+// This needs to be added: Function returns Result
 fn execute_service_order(order: &Order) {
     // Check if meta action (no state changes)
     // FIXED: Check both target AND empty properties
-    let is_meta = order.target == "list" || order.target == "help" || order.target == "reset";
+    let is_meta = order.action == Action::List
+        || order.action == Action::Help
+        || order.action == Action::Reset;
 
-    if is_meta || order.desired_properties.is_empty() {
-        match order.target.as_str() {
-            "list" => services::list_services(),
-            "help" => services::help_service(),
-            "reset" => action_result_formatter::action_output(order, "resetting"),
+    if is_meta && order.desired_properties.is_empty() {
+        match order.action.clone() {
+            Action::List => services::list_services(),
+            Action::Help => services::help_service(),
+            Action::Reset => action_result_formatter::action_output(order, "resetting"),
             _ => {
                 // This is "status" - pass the target as argument
-                services::status_service(Some(vec![order.target.clone()]))
+                // services::status_service(Some(vec![order.target.clone()]))
             }
         }
         return;
-    }
-
-    // Create and execute plan
-    match planner::create_plan(order.clone()) {
-        Ok(plan) => {
-            if plan.steps.is_empty() {
-                println!("✓ No changes needed - service already in desired state");
+    } else if !is_meta && order.desired_properties.is_empty() {
+        match order.action.clone() {
+            Action::Status => services::status_service(Some(vec![order.target.clone()])),
+            Action::Reload => action_result_formatter::action_output(order, "reloading"),
+            _ => {
+                // Supposed to return error of invalid command
                 return;
             }
-
-            println!("=== Execution Plan ===");
-            for (i, step) in plan.steps.iter().enumerate() {
-                println!("{}. {}", i + 1, step.description);
-            }
-            println!();
-
-            // Execute each step
-            for step in &plan.steps {
-                execute_step(step, order);
-            }
         }
-        Err(e) => println!("✗ Planning failed: {}", e),
+        return;
+    } else {
+        // Create and execute plan
+        match planner::create_plan(order.clone()) {
+            Ok(plan) => {
+                if plan.steps.is_empty() {
+                    println!("✓ No changes needed - service already in desired state");
+                    return;
+                }
+
+                println!("=== Execution Plan ===");
+                for (i, step) in plan.steps.iter().enumerate() {
+                    println!("{}. {}", i + 1, step.description);
+                }
+                println!();
+
+                // Execute each step
+                for step in &plan.steps {
+                    execute_step(step, order);
+                }
+            }
+            Err(e) => println!("✗ Planning failed: {}", e),
+        }
     }
 }
 

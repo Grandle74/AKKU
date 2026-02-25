@@ -72,7 +72,16 @@ fn handle_command(parts: &[String]) {
             println!("See '{} help' for more information.", domain);
         }
         2 => {
-            let process = process_bi_command(domain, parts[1].as_str());
+            let action = &parts[1];
+            let process = process_bi_command(domain, action);
+            if let Some(e) = process.err() {
+                println!("{}", e);
+            }
+        }
+        3 => {
+            let action = parts[1].clone();
+            let target = parts[2].clone();
+            let process = process_tri_command(domain, action, target, HashMap::new());
             if let Some(e) = process.err() {
                 println!("{}", e);
             }
@@ -84,34 +93,47 @@ fn handle_command(parts: &[String]) {
 }
 
 fn handle_declarative(domain: &str, parts: &[String]) {
-    let target = parts[1].to_string();
+    let action = parts[1].to_string();
+    let target = parts[2].to_string();
     let mut properties = HashMap::new();
 
-    // Parse key=value pairs
-    for prop_str in &parts[2..] {
-        if let Some((key, value)) = prop_str.split_once('=') {
-            let parsed_value = match value {
-                "true" | "yes" | "1" => PropertyValue::Bool(true),
-                "false" | "no" | "0" => PropertyValue::Bool(false),
-                _ => {
-                    // Try to parse as number, if no then as a string
-                    if let Ok(num) = value.parse::<i64>() {
-                        PropertyValue::Number(num)
-                    } else {
-                        PropertyValue::String(value.to_string())
-                    }
+    // Parse key=value pairs of properties if the action was to Change/Config
+    if action.as_str() == "change" || action.as_str() == "config" {
+        for prop_str in &parts[3..] {
+            if let Some((key, value)) = prop_str.split_once('=') {
+                if !value.is_empty() {
+                    let parsed_value = match value {
+                        "true" | "yes" | "1" => PropertyValue::Bool(true),
+                        "false" | "no" | "0" => PropertyValue::Bool(false),
+                        _ => {
+                            // Try to parse as number, if no then as a string
+                            if let Ok(num) = value.parse::<i64>() {
+                                PropertyValue::Number(num)
+                            } else {
+                                PropertyValue::String(value.to_string())
+                            }
+                        }
+                    };
+                    properties.insert(key.to_string(), parsed_value);
+                } else {
+                    //println!("✗ Error: Check Help for properties");
                 }
-            };
-            properties.insert(key.to_string(), parsed_value);
+            }
         }
-    }
-
-    if properties.is_empty() {
-        println!("✗ Error: No properties specified");
+    } else {
+        println!("✗ Error: Invalid command, check '{} help'", domain);
         return;
     }
 
-    match process_tri_command(domain, target, properties) {
+    if properties.is_empty() {
+        println!(
+            "✗ Error: No properties were provided, check '{} help'",
+            domain
+        );
+        return;
+    }
+
+    match process_tri_command(domain, action, target, properties) {
         Ok(_) => {}
         Err(err) => println!("✗ Error: {}", err),
     }
