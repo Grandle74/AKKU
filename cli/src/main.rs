@@ -101,12 +101,17 @@ fn handle_declarative(domain: &str, parts: &[String]) {
     if action.as_str() == "change" || action.as_str() == "config" {
         for prop_str in &parts[3..] {
             if let Some((key, value)) = prop_str.split_once('=') {
+                if key.is_empty() {
+                    println!("✗ Error: Invalid property - check '{} help'", domain);
+                    return;
+                }
                 if !value.is_empty() {
                     let parsed_value = match value {
                         "true" | "yes" | "1" => PropertyValue::Bool(true),
                         "false" | "no" | "0" => PropertyValue::Bool(false),
                         _ => {
                             // Try to parse as number, if no then as a string
+                            // In case of a property that needs a custom value
                             if let Ok(num) = value.parse::<i64>() {
                                 PropertyValue::Number(num)
                             } else {
@@ -116,7 +121,8 @@ fn handle_declarative(domain: &str, parts: &[String]) {
                     };
                     properties.insert(key.to_string(), parsed_value);
                 } else {
-                    //println!("✗ Error: Check Help for properties");
+                    println!("✗ Error: Invalid Property value - check '{} help'", domain);
+                    return;
                 }
             }
         }

@@ -52,6 +52,12 @@ pub fn process_tri_command(
             Ok(())
         }
         Action::Config => {
+            if properties.is_empty() {
+                return Err(format!(
+                    "-_- Are you even serious? - check '{} help'",
+                    domain_str
+                ));
+            }
             validate_conflicts(domain.clone(), &properties)?;
             let order = Order {
                 domain,

@@ -19,13 +19,6 @@ pub struct Order {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum PropertyValue {
-    Bool(bool),
-    String(String),
-    Number(i64),
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     Start,
     Stop,
@@ -39,6 +32,37 @@ pub enum Action {
     Help,
     Reset,
     Config,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PropertyValue {
+    Bool(bool),
+    String(String),
+    Number(i64),
+}
+
+impl PropertyValue {
+    pub fn as_bool(&self) -> Option<bool> {
+        if let PropertyValue::Bool(b) = self {
+            Some(*b)
+        } else {
+            None
+        }
+    }
+    pub fn as_string(&self) -> Option<&str> {
+        if let PropertyValue::String(b) = self {
+            Some(b)
+        } else {
+            None
+        }
+    }
+    pub fn as_number(&self) -> Option<i64> {
+        if let PropertyValue::Number(b) = self {
+            Some(*b)
+        } else {
+            None
+        }
+    }
 }
 
 pub fn execute_order(order: &Order) {
