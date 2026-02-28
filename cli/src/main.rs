@@ -108,6 +108,14 @@ fn handle_declarative(domain: &str, parts: &[String]) {
                         .map(PropertyValue::Number)
                         .unwrap_or_else(|_| PropertyValue::String(value.to_string())),
                 };
+                // This part prevents from having the same property/key multiple times
+                if properties.contains_key(key) {
+                    println!(
+                        "✗ Error: Duplicated property '{}' — check '{} help'",
+                        key, domain
+                    );
+                    return;
+                }
                 properties.insert(key.to_string(), parsed);
             }
             // =value or = (no key)

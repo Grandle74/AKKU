@@ -10,16 +10,17 @@ pub fn validate(properties: &HashMap<String, PropertyValue>) -> Result<(), Strin
     }
 
     // ── Conflict checks ───────────────────────────────────────────────────────
-    // let running = get_bool(properties, "running");
-    // let enabled = get_bool(properties, "enabled");
-    // let masked  = get_bool(properties, "masked");
-    //
-    // if enabled == Some(true) && masked == Some(true) {
-    //     return Err("Conflict: cannot enable a masked service — unmask it first.".into());
-    // }
-    // if running == Some(true) && masked == Some(true) {
-    //     return Err("Conflict: cannot start a masked service — unmask it first.".into());
-    // }
+    let running = get_bool(properties, "running");
+    let enabled = get_bool(properties, "enabled");
+    let masked = get_bool(properties, "masked");
+
+    if enabled == Some(true) && masked == Some(true) {
+        return Err("Cannot enable and mask a service — mask prevents enabling.".into());
+    }
+    if running == Some(true) && masked == Some(true) {
+        return Err("Cannot start and mask a service — mask prevents starting.".into());
+    }
+    // ───────────────────────────────────────────────────────────────────────────
 
     Ok(())
 }
@@ -41,7 +42,7 @@ fn validate_property(key: &str, value: &PropertyValue) -> Result<(), String> {
     }
 }
 
-#[allow(dead_code)]
+//#[allow(dead_code)]
 fn get_bool(props: &HashMap<String, PropertyValue>, key: &str) -> Option<bool> {
     props.get(key)?.as_bool()
 }

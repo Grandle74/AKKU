@@ -32,7 +32,6 @@ pub fn process_tri_intent(
 ) -> Result<(), String> {
     let domain = parse_domain(domain_str)?;
     let action = parse_action(&action_str)?;
-
     match action {
         // Read-only actions — just need the target
         Action::Status | Action::Reload => {
