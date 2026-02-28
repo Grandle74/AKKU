@@ -4,33 +4,27 @@ use engine::{Action, Domain, Order, execute_order};
 use std::collections::HashMap;
 mod service_validator;
 
-// In case of having a non target command, Frontend calls this function
-pub fn process_bi_command(domain_str: &str, action_str: &String) -> Result<(), String> {
+/// Intent with no target (list, help, reset, ...)
+pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<(), String> {
     let domain = parse_domain(domain_str)?;
     let action = parse_action(action_str)?;
 
     match action {
         Action::List | Action::Help | Action::Reset => {
-            let order = Order {
+            execute_order(&Order {
                 domain,
-                action: action,
-                target: "".to_string(),
+                action,
+                target: String::new(),
                 desired_properties: HashMap::new(),
-            };
-            execute_order(&order);
+            });
             Ok(())
         }
-        _ => Err(format!("✗ Invalid Command: See '{} help'", domain_str).to_string()),
+        _ => Err(format!("✗ Invalid command — see '{} help'", domain_str)),
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-//      NEW: REPLACE IMPERATIVE WITH DECLARATIVE FUNCTION
-// ═══════════════════════════════════════════════════════════
-
-// This function is the responsible of generating the Order using the Intent Data given by the Frontend
-// It Parses the Domain String into Domain Type/Enum
-pub fn process_tri_command(
+/// Intent with a target, and optionally desired properties (status, start, change, ...)
+pub fn process_tri_intent(
     domain_str: &str,
     action_str: String,
     target: String,
@@ -40,44 +34,40 @@ pub fn process_tri_command(
     let action = parse_action(&action_str)?;
 
     match action {
+        // Read-only actions — just need the target
         Action::Status | Action::Reload => {
-            let order = Order {
+            execute_order(&Order {
                 domain,
                 action,
                 target,
                 desired_properties: properties,
-            };
-
-            execute_order(&order);
+            });
             Ok(())
         }
+
+        // Declarative — needs target + at least one property
         Action::Config => {
             if properties.is_empty() {
                 return Err(format!(
-                    "-_- Are you even serious? - check '{} help'",
+                    "✗ No properties provided — see '{} help'",
                     domain_str
                 ));
             }
             validate_conflicts(domain.clone(), &properties)?;
-            let order = Order {
+            execute_order(&Order {
                 domain,
                 action,
                 target,
                 desired_properties: properties,
-            };
-
-            execute_order(&order);
+            });
             Ok(())
         }
-        _ => Err(format!("✗ Invalid Command: See '{} help'", domain_str).to_string()),
-    }
 
-    // Validate CONFLICTS before generating the order
+        _ => Err(format!("✗ Invalid command — see '{} help'", domain_str)),
+    }
 }
 
-// ════════════════════════════════════════════════════════════
-//  NEW: CONFLICT VALIDATION - Generalized for future modules
-// ════════════════════════════════════════════════════════════
+// ── Conflict validation — dispatches per domain ──────────────────────────────
 
 fn validate_conflicts(
     domain: Domain,
@@ -85,20 +75,21 @@ fn validate_conflicts(
 ) -> Result<(), String> {
     match domain {
         Domain::Services => service_validator::validate(properties),
-        // Future: Domain::Network => validate_network_conflicts(properties),
+        // Future: Domain::Network => network_validator::validate(properties),
     }
 }
 
-fn parse_domain(domain: &str) -> Result<Domain, String> {
-    match domain {
+// ── Parsers ───────────────────────────────────────────────────────────────────
+
+fn parse_domain(s: &str) -> Result<Domain, String> {
+    match s {
         "service" | "services" => Ok(Domain::Services),
-        // "net" | "network" => Ok(Domain::Networks), <- for future Network Module
-        _ => Err(format!("Unknown module: '{}'\nAvailable: service", domain)),
+        _ => Err(format!("Unknown module '{}' — available: service", s)),
     }
 }
 
-fn parse_action(action: &String) -> Result<Action, String> {
-    match action.as_str() {
+fn parse_action(s: &str) -> Result<Action, String> {
+    match s {
         "start" => Ok(Action::Start),
         "stop" => Ok(Action::Stop),
         "enable" => Ok(Action::Enable),
@@ -111,13 +102,6 @@ fn parse_action(action: &String) -> Result<Action, String> {
         "help" => Ok(Action::Help),
         "reset" => Ok(Action::Reset),
         "change" | "config" => Ok(Action::Config),
-        _ => Err("✗ Error: Invalid command action".to_string()),
-    }
-}
-
-fn get_bool(props: &HashMap<String, PropertyValue>, key: &str) -> Option<bool> {
-    match props.get(key) {
-        Some(PropertyValue::Bool(b)) => Some(*b),
-        _ => None,
+        _ => Err(format!("Unknown action '{}'", s)),
     }
 }

@@ -1,43 +1,39 @@
 // cli/src/main.rs
-use api::{PropertyValue, process_bi_command, process_tri_command};
+use api::{PropertyValue, process_bi_intent, process_tri_intent};
 use std::collections::HashMap;
 use std::io::{self, Write};
 
 fn main() {
     println!("Welcome to YaST3 (prototype)!");
     println!(
-        "This is a prototype of YaST3, a system configuration tool. Have fun!\n________________________________________________________"
+        "This is a prototype of YaST3, a system configuration tool.\n{}",
+        "─".repeat(56)
     );
     println!("Enter \"help\" for commands list\n");
 
-    'com_loop: loop {
+    'repl: loop {
         print!("commando(v0.1)~> ");
         io::stdout().flush().unwrap();
 
-        let mut command_in = String::new();
-        io::stdin().read_line(&mut command_in).unwrap();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
 
-        let command_parts: Vec<String> = command_in
-            .trim()
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .collect();
-
-        if command_parts.is_empty() {
+        let parts: Vec<String> = input.trim().split_whitespace().map(String::from).collect();
+        if parts.is_empty() {
             continue;
         }
 
-        match command_parts[0].as_str() {
+        match parts[0].as_str() {
             "help" => show_help(),
             "exit" | "quit" => {
                 println!("Exiting...");
-                break 'com_loop;
+                break 'repl;
             }
             "clear" | "cls" => {
                 print!("\x1B[2J\x1B[1;1H");
                 io::stdout().flush().unwrap();
             }
-            _ => handle_command(&command_parts),
+            _ => handle_intent(&parts),
         }
     }
 }
@@ -48,47 +44,45 @@ fn show_help() {
     println!("  clear             - Clear the screen");
     println!("  exit              - Exit the program");
     println!("\n=== Module Commands ===");
-    println!("  Imperative style (execute single action):");
+    println!("  Imperative style (single action):");
     println!("    service <action> [name]");
     println!("    Examples:");
     println!("      service list");
     println!("      service start nginx");
     println!("      service status nginx");
-    println!("\n  Declarative style (specify desired state):");
-    println!("    service <name> <property>=<value> ...");
+    println!("\n  Declarative style (desired state):");
+    println!("    service <name> change <property>=<value> ...");
     println!("    Properties: running, enabled, masked");
     println!("    Examples:");
-    println!("      service nginx running=true enabled=true");
-    println!("      service nginx masked=false");
-    println!("      service nginx running=true enabled=true masked=false\n");
+    println!("      service nginx change running=true enabled=true");
+    println!("      service nginx change masked=false\n");
 }
 
-fn handle_command(parts: &[String]) {
+fn handle_intent(parts: &[String]) {
     let domain = &parts[0];
 
     match parts.len() {
-        1 => {
-            // It doesn't tell you if the Command exists - not its job!
-            println!("See '{} help' for more information.", domain);
-        }
+        // domain (no action given)
+        1 => println!("See '{} help' for more information.", domain),
+
+        // domain <action>  →  list, help, reset, ...
         2 => {
-            let action = &parts[1];
-            let process = process_bi_command(domain, action);
-            if let Some(e) = process.err() {
+            if let Err(e) = process_bi_intent(domain, &parts[1]) {
                 println!("{}", e);
             }
         }
+
+        // domain <action> <target>  →  status nginx, start nginx, ...
         3 => {
-            let action = parts[1].clone();
-            let target = parts[2].clone();
-            let process = process_tri_command(domain, action, target, HashMap::new());
-            if let Some(e) = process.err() {
+            if let Err(e) =
+                process_tri_intent(domain, parts[1].clone(), parts[2].clone(), HashMap::new())
+            {
                 println!("{}", e);
             }
         }
-        _ => {
-            handle_declarative(domain, parts);
-        }
+
+        // domain <target> change <property>=<value> ...  →  declarative
+        _ => handle_declarative(domain, parts),
     }
 }
 
@@ -97,50 +91,52 @@ fn handle_declarative(domain: &str, parts: &[String]) {
     let target = parts[2].to_string();
     let mut properties = HashMap::new();
 
-    // Parse key=value pairs of properties if the action was to Change/Config
-    if action.as_str() == "change" || action.as_str() == "config" {
-        for prop_str in &parts[3..] {
-            if let Some((key, value)) = prop_str.split_once('=') {
-                if key.is_empty() {
-                    println!("✗ Error: Invalid property - check '{} help'", domain);
-                    return;
-                }
-                if !value.is_empty() {
-                    let parsed_value = match value {
-                        "true" | "yes" | "1" => PropertyValue::Bool(true),
-                        "false" | "no" | "0" => PropertyValue::Bool(false),
-                        _ => {
-                            // Try to parse as number, if no then as a string
-                            // In case of a property that needs a custom value
-                            if let Ok(num) = value.parse::<i64>() {
-                                PropertyValue::Number(num)
-                            } else {
-                                PropertyValue::String(value.to_string())
-                            }
-                        }
-                    };
-                    properties.insert(key.to_string(), parsed_value);
-                } else {
-                    println!("✗ Error: Invalid Property value - check '{} help'", domain);
-                    return;
-                }
+    if action != "change" && action != "config" {
+        println!("✗ Error: Invalid command — check '{} help'", domain);
+        return;
+    }
+
+    for token in &parts[3..] {
+        match token.split_once('=') {
+            // valid key=value
+            Some((key, value)) if !key.is_empty() && !value.is_empty() => {
+                let parsed = match value {
+                    "true" | "yes" | "1" => PropertyValue::Bool(true),
+                    "false" | "no" | "0" => PropertyValue::Bool(false),
+                    _ => value
+                        .parse::<i64>()
+                        .map(PropertyValue::Number)
+                        .unwrap_or_else(|_| PropertyValue::String(value.to_string())),
+                };
+                properties.insert(key.to_string(), parsed);
+            }
+            // =value or = (no key)
+            Some((key, _)) if key.is_empty() => {
+                println!("✗ Error: Invalid property — check '{} help'", domain);
+                return;
+            }
+            // key= (no value)
+            Some(_) => {
+                println!("✗ Error: Invalid property value — check '{} help'", domain);
+                return;
+            }
+            // no '=' at all — prop written without assignment
+            None => {
+                println!(
+                    "✗ Error: Property must be in key=value format — check '{} help'",
+                    domain
+                );
+                return;
             }
         }
-    } else {
-        println!("✗ Error: Invalid command, check '{} help'", domain);
-        return;
     }
 
     if properties.is_empty() {
-        println!(
-            "✗ Error: No properties were provided, check '{} help'",
-            domain
-        );
+        println!("✗ Error: No properties provided — check '{} help'", domain);
         return;
     }
 
-    match process_tri_command(domain, action, target, properties) {
-        Ok(_) => {}
-        Err(err) => println!("✗ Error: {}", err),
+    if let Err(e) = process_tri_intent(domain, action, target, properties) {
+        println!("✗ Error: {}", e);
     }
 }

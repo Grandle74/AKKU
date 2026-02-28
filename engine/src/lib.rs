@@ -1,16 +1,15 @@
 // engine/src/lib.rs
 use std::collections::HashMap;
-
 mod action_result_formatter;
 mod planner;
 
 #[derive(Debug, Clone)]
 pub enum Domain {
     Services,
-    // Future: Network, Users, etc.
+    // Future: Network, Users, ...
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct Order {
     pub domain: Domain,
     pub action: Action,
@@ -20,6 +19,7 @@ pub struct Order {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
+    // Action — single explicit operation, some is used only by Config Action
     Start,
     Stop,
     Enable,
@@ -28,9 +28,11 @@ pub enum Action {
     Unmask,
     Reload,
     Status,
+    // Meta — no target, no state change
     List,
     Help,
     Reset,
+    // Declarative — converge to desired state via planner
     Config,
 }
 
@@ -43,22 +45,22 @@ pub enum PropertyValue {
 
 impl PropertyValue {
     pub fn as_bool(&self) -> Option<bool> {
-        if let PropertyValue::Bool(b) = self {
-            Some(*b)
+        if let Self::Bool(v) = self {
+            Some(*v)
         } else {
             None
         }
     }
     pub fn as_string(&self) -> Option<&str> {
-        if let PropertyValue::String(b) = self {
-            Some(b)
+        if let Self::String(v) = self {
+            Some(v)
         } else {
             None
         }
     }
     pub fn as_number(&self) -> Option<i64> {
-        if let PropertyValue::Number(b) = self {
-            Some(*b)
+        if let Self::Number(v) = self {
+            Some(*v)
         } else {
             None
         }
@@ -71,69 +73,53 @@ pub fn execute_order(order: &Order) {
     }
 }
 
-// This needs to be added: Function returns Result
 fn execute_service_order(order: &Order) {
-    // Check if meta action (no state changes)
-    // FIXED: Check both target AND empty properties
-    let is_meta = order.action == Action::List
-        || order.action == Action::Help
-        || order.action == Action::Reset;
+    let is_meta = matches!(order.action, Action::List | Action::Help | Action::Reset);
 
     if is_meta && order.desired_properties.is_empty() {
-        match order.action.clone() {
+        // Meta: no target, no properties
+        match order.action {
             Action::List => services::list_services(),
             Action::Help => services::help_service(),
             Action::Reset => action_result_formatter::action_output(order, "resetting"),
-            _ => {
-                // This is "status" - pass the target as argument
-                // services::status_service(Some(vec![order.target.clone()]))
-            }
+            _ => {}
         }
-        return;
     } else if !is_meta && order.desired_properties.is_empty() {
-        match order.action.clone() {
+        // Imperative: target only, no properties
+        match order.action {
             Action::Status => services::status_service(Some(vec![order.target.clone()])),
             Action::Reload => action_result_formatter::action_output(order, "reloading"),
-            _ => {
-                // Supposed to return error of invalid command
-                return;
-            }
+            _ => {} // Invalid commands are caught by the API before reaching here
         }
-        return;
     } else {
-        // Create and execute plan
+        // Declarative: execute plan produced by planner
         match planner::create_plan(order.clone()) {
+            Err(e) => println!("✗ Planning failed: {}", e),
+            Ok(plan) if plan.steps.is_empty() => {
+                println!("✓ Already in desired state — no changes needed");
+            }
             Ok(plan) => {
-                if plan.steps.is_empty() {
-                    println!("✓ No changes needed - service already in desired state");
-                    return;
-                }
-
                 println!("=== Execution Plan ===");
                 for (i, step) in plan.steps.iter().enumerate() {
                     println!("{}. {}", i + 1, step.description);
                 }
                 println!();
-
-                // Execute each step
-                for step in &plan.steps {
-                    execute_step(step, order);
-                }
+                plan.steps.iter().for_each(|step| execute_step(step, order));
             }
-            Err(e) => println!("✗ Planning failed: {}", e),
         }
     }
 }
 
 fn execute_step(step: &planner::Step, order: &Order) {
-    match step.action {
-        Action::Start => action_result_formatter::action_output(order, "starting"),
-        Action::Stop => action_result_formatter::action_output(order, "stopping"),
-        Action::Enable => action_result_formatter::action_output(order, "enabling"),
-        Action::Disable => action_result_formatter::action_output(order, "disabling"),
-        Action::Mask => action_result_formatter::action_output(order, "masking"),
-        Action::Unmask => action_result_formatter::action_output(order, "unmasking"),
-        Action::Reload => action_result_formatter::action_output(order, "reloading"),
-        _ => {}
-    }
+    let verb = match step.action {
+        Action::Start => "starting",
+        Action::Stop => "stopping",
+        Action::Enable => "enabling",
+        Action::Disable => "disabling",
+        Action::Mask => "masking",
+        Action::Unmask => "unmasking",
+        Action::Reload => "reloading",
+        _ => return,
+    };
+    action_result_formatter::action_output(order, verb);
 }

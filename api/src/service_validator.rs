@@ -1,51 +1,47 @@
-use crate::{PropertyValue, get_bool};
+// api/src/service_validator.rs
+use crate::PropertyValue;
 use std::collections::HashMap;
 
+/// Validates all properties: known keys + correct value types.
+/// Conflict checks are ready — uncomment to activate.
 pub fn validate(properties: &HashMap<String, PropertyValue>) -> Result<(), String> {
-    for (prop, value) in properties {
-        if let Err(e) = validate_prop_value(prop, value) {
-            return Err(e);
-        }
+    for (key, value) in properties {
+        validate_property(key, value)?;
     }
-    return Ok(());
 
-    // The following code is commented out - till we implement it
-    // It's supposed to validate the changes and order them so that
-    // the service is not masked and enabled at the same time
-    // or enabled and disabled at the same time
-
+    // ── Conflict checks ───────────────────────────────────────────────────────
     // let running = get_bool(properties, "running");
     // let enabled = get_bool(properties, "enabled");
-    // let masked = get_bool(properties, "masked");
-
-    // Conflict 1: Can't enable a masked service
+    // let masked  = get_bool(properties, "masked");
+    //
     // if enabled == Some(true) && masked == Some(true) {
-    //     return Err(
-    //         "Conflict: Cannot enable a service while it's masked. Unmask it first.".to_string(),
-    //     );
+    //     return Err("Conflict: cannot enable a masked service — unmask it first.".into());
+    // }
+    // if running == Some(true) && masked == Some(true) {
+    //     return Err("Conflict: cannot start a masked service — unmask it first.".into());
     // }
 
-    // Conflict 2: Can't start a masked service
-    // if running == Some(true) && masked == Some(true) {
-    //     return Err(
-    //         "Conflict: Cannot start a service while it's masked. Unmask it first.".to_string(),
-    //     );
-    // }
+    Ok(())
 }
 
-// This validator checks if the property is valid
-// Every property has its own specific valid values
-// So... it also validates those values
-fn validate_prop_value(prop: &String, value: &PropertyValue) -> Result<(), String> {
-    match prop.as_str() {
-        "running" | "enabled" | "masked" => {
-            if let Some(_) = value.as_bool() {
-                return Ok(());
-            }
-        }
-        // "property_name_its_value_is_a_string" => if let Some(_) = value.as_string(){return Ok(());}
-        // "property_name_its_value_is_a_number" => if let Some(_) = value.as_number(){return Ok(());}
-        _ => return Err(format!("Invalid property: {}, check 'service help'", prop)),
+fn validate_property(key: &str, value: &PropertyValue) -> Result<(), String> {
+    match key {
+        "running" | "enabled" | "masked" => value
+            .as_bool()
+            .map(|_| ())
+            .ok_or_else(|| format!("'{}' expects true/false — check 'service help'", key)),
+        // ──── Note for me: ────────────────────────────────────────────────────────────────
+        // .map() here is use to discard the boolean.
+        // Why? Because validation only cares that it is a boolean, not what it is.
+        // ok_or_else() obviously returns Result type
+        //───────────────────────────────────────────────────────────────────────────────────
+        // Future string property example:
+        // "some_key" => value.as_string().map(|_| ()).ok_or_else(|| ...),
+        _ => Err(format!("Unknown property '{}' — check 'service help'", key)),
     }
-    Err("Invalid property value, check 'service help'".to_string())
+}
+
+#[allow(dead_code)]
+fn get_bool(props: &HashMap<String, PropertyValue>, key: &str) -> Option<bool> {
+    props.get(key)?.as_bool()
 }
