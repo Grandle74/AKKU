@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+shared_libs = { path = "../shared" }
 #fs = { path = "../modules/fs" }
 #network = { path = "../modules/network" }
 #package = { path = "../modules/package" }

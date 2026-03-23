@@ -1,7 +1,7 @@
 use std::process::Command;
 
-pub mod current_state;
 mod error_catcher;
+pub mod state_helpers;
 
 // this function prints, it needs to return instead!
 // (will work on it in the future when needed, in shaa' allah)

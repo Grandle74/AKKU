@@ -2,7 +2,7 @@ use std::process::Command;
 
 #[derive(Debug)]
 pub struct ChildProperties {
-    // IDK WHAT ARE THESE COMMENTS X)
+    // IDK WHAT ARE THESE COMMENTS XD
     pub load_state: String,            // preflight only
     pub active_state: String,          // required
     pub sub_state: String,             // required

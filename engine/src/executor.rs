@@ -1,26 +1,41 @@
-// engine/executor.rs
-pub fn run_plan(plan: &ExecutionPlan) -> Result<(), String> {
-    for step in &plan.steps {
-        match step.domain {
-            Domain::Services => {
-                execute_service_step(step)?;
-            } // Future: Domain::Network => execute_network_step(step)?
-        }
+// engine/src/executor.rs
+use crate::{Action, Order, module_resolver::ModuleId};
+
+pub fn execute(order: &Order, module_id: ModuleId) -> Result<(), String> {
+    match module_id {
+        ModuleId::Services => execute_services(order),
     }
-    Ok(())
 }
 
-fn execute_service_step(step: &Step) -> Result<(), String> {
-    // Call your existing service functions
-    let args = Some(vec![step.target.clone()]);
-
-    match step.action {
-        Action::Start => services::start_service(&args)
-            .map(|_| ())
-            .map_err(|e| e.join(", ")),
-        Action::Stop => services::stop_service(&args)
-            .map(|_| ())
-            .map_err(|e| e.join(", ")),
-        // ... etc
+fn execute_services(order: &Order) -> Result<(), String> {
+    match &order.action {
+        Action::Meta(a) => match a.as_str() {
+            "list" => {
+                services::list_services();
+                Ok(())
+            }
+            "help" => {
+                services::help_service();
+                Ok(())
+            }
+            "reset" => {
+                println!("resetting...");
+                Ok(())
+            }
+            _ => Err(format!("Unknown meta action '{}'", a)),
+        },
+        Action::Custom(a) => match a.as_str() {
+            "status" => {
+                // Convert target to Option<Vec<String>> for status_service
+                // This is a temporary conversion until status_service accepts Option<Vec<String>>
+                let order_con: Option<Vec<String>> = order.target.clone().map(|s| vec![s]);
+                services::status_service(order_con);
+                Ok(())
+            }
+            _ => Err(format!("Unknown action '{}'", a)),
+        },
+        Action::Config => {
+            todo!("Config execution is missing :\\");
+        }
     }
 }
