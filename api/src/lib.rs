@@ -1,6 +1,6 @@
 // api/src/lib.rs
 pub use engine::PropertyValue;
-use engine::{Action, Domain, EngineConfig, Order, execute_order};
+use engine::{Action, Domain, Order, execute_order};
 use std::collections::HashMap;
 mod service_validator;
 
@@ -20,10 +20,7 @@ pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<Strin
                     target: None,
                     desired_properties: HashMap::new(),
                 },
-                EngineConfig {
-                    dry_run: true,
-                    auto_approve: false,
-                },
+                false, // dry run
             )
         }
 
@@ -70,10 +67,7 @@ pub fn process_tri_intent(
             target: Some(target),
             desired_properties: properties,
         },
-        EngineConfig {
-            dry_run: false,
-            auto_approve: true,
-        },
+        false, // dry run
     )
 }
 // ── Conflict validation — dispatches per domain ──────────────────────────────

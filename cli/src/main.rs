@@ -11,7 +11,7 @@ fn main() {
     );
     println!("Enter \"help\" for commands list\n");
 
-    'repl: loop {
+    'replay: loop {
         print!("commando(v0.1)~> ");
         io::stdout().flush().unwrap();
 
@@ -27,7 +27,7 @@ fn main() {
             "help" => show_help(),
             "exit" | "quit" => {
                 println!("Exiting...");
-                break 'repl;
+                break 'replay;
             }
             "clear" | "cls" => {
                 print!("\x1B[2J\x1B[1;1H");
