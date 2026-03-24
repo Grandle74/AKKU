@@ -30,7 +30,7 @@ impl ServiceCurrentState {
         Ok(Self {
             name: name.to_string(),
             active: Self::query_stdout(name, &["is-active", name]) == "active",
-            enabled: enabled_out == "enabled",
+            enabled: (enabled_out == "enabled" || enabled_out == "static"),
             masked: enabled_out == "masked",
         })
     }

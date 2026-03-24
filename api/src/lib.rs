@@ -5,14 +5,15 @@ use std::collections::HashMap;
 mod service_validator;
 
 /// Intent with no target (list, help, reset, ...)
-pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<(), String> {
-    let domain = parse_domain(domain_str)?;
-    let action = parse_action(action_str)?;
+pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<String>, Vec<String>> {
+    let domain = parse_domain(domain_str).map_err(|e| vec![e])?;
+    let action = parse_action(action_str).map_err(|e| vec![e])?;
 
     match action {
-        Action::Meta(_) => {
-            // Execution Result of execute_order is ignored temporarily
-            let _ = execute_order(
+        Action::Meta(_) =>
+        // Execution Result of execute_order is ignored temporarily
+        {
+            execute_order(
                 Order {
                     domain,
                     action,
@@ -23,10 +24,13 @@ pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<(), Strin
                     dry_run: true,
                     auto_approve: false,
                 },
-            );
-            Ok(())
+            )
         }
-        _ => Err(format!("✗ Invalid command — see '{} help'", domain_str)),
+
+        _ => Err(vec![format!(
+            "✗ Invalid command — see '{} help'",
+            domain_str
+        )]),
     }
 }
 
@@ -36,25 +40,30 @@ pub fn process_tri_intent(
     action_str: String,
     target: String,
     properties: HashMap<String, PropertyValue>,
-) -> Result<(), String> {
-    let domain = parse_domain(domain_str)?;
-    let action = parse_action(&action_str)?;
+) -> Result<Vec<String>, Vec<String>> {
+    let domain = parse_domain(domain_str).map_err(|e| vec![e])?;
+    let action = parse_action(&action_str).map_err(|e| vec![e])?;
 
     match action {
-        Action::Meta(_) => return Err(format!("✗ Invalid command — see '{} help'", domain_str)),
+        Action::Meta(_) => {
+            return Err(vec![format!(
+                "✗ Invalid command — see '{} help'",
+                domain_str
+            )]);
+        }
         Action::Config => {
             if properties.is_empty() {
-                return Err(format!(
+                return Err(vec![format!(
                     "✗ No properties provided — see '{} help'",
                     domain_str
-                ));
+                )]);
             }
-            validate_conflicts(domain.clone(), &properties)?;
+            validate_conflicts(domain.clone(), &properties).map_err(|e| vec![e])?;
         }
         Action::Custom(_) => {} // fine, just execute
     }
 
-    let _ = execute_order(
+    execute_order(
         Order {
             domain,
             action,
@@ -63,10 +72,9 @@ pub fn process_tri_intent(
         },
         EngineConfig {
             dry_run: true,
-            auto_approve: false,
+            auto_approve: true,
         },
-    );
-    Ok(())
+    )
 }
 // ── Conflict validation — dispatches per domain ──────────────────────────────
 // Alhamdulillah ── it's located in the actual Module Crate

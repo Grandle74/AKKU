@@ -5,31 +5,19 @@ pub mod state_helpers;
 
 // this function prints, it needs to return instead!
 // (will work on it in the future when needed, in shaa' allah)
-pub fn status_service(args: Option<Vec<String>>) {
-    let service = match error_catcher::validate_service_name(&args) {
-        Ok(s) => s,
-        Err(errs) => {
-            for err in errs {
-                println!("✗ {}", err);
-            }
-            return;
-        }
-    };
+pub fn status_service(args: Option<Vec<String>>) -> Result<Vec<String>, String> {
+    let service = error_catcher::validate_service_name(&args).map_err(|e| e.join("\n"))?;
+    error_catcher::validate_service_exists(service).map_err(|e| e.join("\n"))?;
 
-    if let Err(errs) = error_catcher::validate_service_exists(service) {
-        for err in errs {
-            println!("✗ {}", err);
-        }
-        return;
-    }
-
-    // Just run and display - no capturing needed
-    let mut child = Command::new("systemctl")
+    let output = Command::new("systemctl")
         .args(["status", service])
-        .spawn()
-        .expect("Failed to spawn systemctl command");
+        .output()
+        .map_err(|e| e.to_string())?;
 
-    child.wait().expect("Failed to wait for child");
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|l| l.to_string())
+        .collect())
 }
 
 /// Currently, Just these Actions which returns services errors
@@ -166,31 +154,61 @@ pub fn stop_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<Strin
 }
 
 /// No Argument Actions
-pub fn list_services() {
-    let mut child = Command::new("sh")
-        .args(["-c", "systemctl list-units --type=service"])
-        .spawn()
-        .expect("Failed to spawn systemctl command");
-    child.wait().expect("Failed to wait for systemctl command");
-    println!("batata command completed!")
+pub struct ServiceEntry {
+    pub name: String,
+    pub load_state: String,
+    pub active: String,
+    pub sub_state: String,
+    pub description: String,
 }
 
-pub fn help_service() {
-    println!("if the command is specified to a service, the <service_name> is required");
-    println!("Commands:");
-    println!("  start     Start a service");
-    println!("  stop      Stop a service");
-    println!("  reload    Reload or restart a service");
-    println!("  enable    Enable a service to start at boot");
-    println!("  disable   Disable a service from starting at boot");
-    println!("  reset     Reset the failed services");
-    println!("  mask      Prevent a service from being started");
-    println!("  unmask    Allow a service to be started");
-    println!("  list      List all services");
-    println!("  status    Show the status of a service");
+pub fn list_services() -> Result<Vec<ServiceEntry>, String> {
+    let output = Command::new("systemctl")
+        .args(["list-units", "--type=service", "--no-pager", "--no-legend"])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let entries = stdout
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            Some(ServiceEntry {
+                name: parts.next()?.to_string(),
+                load_state: parts.next()?.to_string(),
+                active: parts.next()?.to_string(),
+                sub_state: parts.next()?.to_string(),
+                description: parts.collect::<Vec<_>>().join(" "),
+            })
+        })
+        .collect();
+
+    Ok(entries)
 }
 
-pub fn reset_service() -> Result<Vec<String>, Vec<String>> {
+pub fn help_service() -> Vec<String> {
+    vec![
+        "Usage: service <action> [target]".to_string(),
+        "       service config <target> <property>=<value> ...".to_string(),
+        "".to_string(),
+        "Imperative actions:".to_string(),
+        "  list              List all services".to_string(),
+        "  reset             Reset the failed services".to_string(),
+        "  status  <name>    Show service status".to_string(),
+        "  start   <name>    Start a service".to_string(),
+        "  stop    <name>    Stop a service".to_string(),
+        "  enable  <name>    Enable at boot".to_string(),
+        "  disable <name>    Disable at boot".to_string(),
+        "  mask    <name>    Prevent from starting".to_string(),
+        "  unmask  <name>    Allow to start".to_string(),
+        "".to_string(),
+        "Declarative (config/change):".to_string(),
+        "  service config <name> running=true enabled=yes masked=0".to_string(),
+    ]
+}
+
+pub fn reset_service() -> Result<Vec<String>, String> {
     // Get list of failed services BEFORE reset
     let failed_services = Command::new("systemctl")
         .args(["list-units", "--failed", "--no-legend", "--plain"])

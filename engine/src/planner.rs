@@ -3,6 +3,8 @@ use shared_libs::Steps;
 use std::collections::HashMap;
 
 pub struct Plan {
+    pub target: String,
+    pub output: String,
     pub steps: Steps,
 }
 
@@ -16,7 +18,22 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Plan, String> {
         // ModuleId::Network => { ... }
     };
 
-    Ok(Plan { steps })
+    // Shall be styled later...
+    let output = format!(
+        "=====Plan for '{}':=====\n{}\n==========================",
+        target,
+        steps
+            .iter()
+            .map(|s| s.description.clone())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    Ok(Plan {
+        target,
+        output,
+        steps,
+    })
 }
 
 fn plan_services(target: String, props: &HashMap<String, PropertyValue>) -> Result<Steps, String> {

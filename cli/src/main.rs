@@ -68,7 +68,9 @@ fn handle_intent(parts: &[String]) {
         // domain <action>  →  list, help, reset, ...
         2 => {
             if let Err(e) = process_bi_intent(domain, &parts[1]) {
-                println!("{}", e);
+                print_lines(e);
+            } else if let Ok(results) = process_bi_intent(domain, &parts[1]) {
+                print_lines(results);
             }
         }
 
@@ -77,7 +79,11 @@ fn handle_intent(parts: &[String]) {
             if let Err(e) =
                 process_tri_intent(domain, parts[1].clone(), parts[2].clone(), HashMap::new())
             {
-                println!("{}", e);
+                print_lines(e);
+            } else if let Ok(results) =
+                process_tri_intent(domain, parts[1].clone(), parts[2].clone(), HashMap::new())
+            {
+                print_lines(results);
             }
         }
 
@@ -145,6 +151,14 @@ fn handle_declarative(domain: &str, parts: &[String]) {
     }
 
     if let Err(e) = process_tri_intent(domain, action, target, properties) {
-        println!("✗ Error: {}", e);
+        print!("✗ Error: ");
+        print_lines(e);
+    }
+}
+
+// Printing results helper
+fn print_lines<T: std::fmt::Display>(items: impl IntoIterator<Item = T>) {
+    for item in items {
+        println!("{}", item);
     }
 }
