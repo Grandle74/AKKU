@@ -71,7 +71,7 @@ pub fn process_tri_intent(
             desired_properties: properties,
         },
         EngineConfig {
-            dry_run: true,
+            dry_run: false,
             auto_approve: true,
         },
     )

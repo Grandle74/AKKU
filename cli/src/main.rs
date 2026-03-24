@@ -62,32 +62,22 @@ fn handle_intent(parts: &[String]) {
     let domain = &parts[0];
 
     match parts.len() {
-        // domain (no action given)
+        // domain only — no action given
         1 => println!("See '{} help' for more information.", domain),
 
         // domain <action>  →  list, help, reset, ...
-        2 => {
-            if let Err(e) = process_bi_intent(domain, &parts[1]) {
-                print_lines(e);
-            } else if let Ok(results) = process_bi_intent(domain, &parts[1]) {
-                print_lines(results);
-            }
-        }
+        2 => match process_bi_intent(domain, &parts[1]) {
+            Ok(output) => print_lines(output),
+            Err(errors) => print_lines(errors),
+        },
 
         // domain <action> <target>  →  status nginx, start nginx, ...
-        3 => {
-            if let Err(e) =
-                process_tri_intent(domain, parts[1].clone(), parts[2].clone(), HashMap::new())
-            {
-                print_lines(e);
-            } else if let Ok(results) =
-                process_tri_intent(domain, parts[1].clone(), parts[2].clone(), HashMap::new())
-            {
-                print_lines(results);
-            }
-        }
+        3 => match process_tri_intent(domain, parts[1].clone(), parts[2].clone(), HashMap::new()) {
+            Ok(output) => print_lines(output),
+            Err(errors) => print_lines(errors),
+        },
 
-        // domain <target> change <property>=<value> ...  →  declarative
+        // domain <target> <action> <property>=<value> ...  →  declarative
         _ => handle_declarative(domain, parts),
     }
 }
@@ -104,7 +94,7 @@ fn handle_declarative(domain: &str, parts: &[String]) {
 
     for token in &parts[3..] {
         match token.split_once('=') {
-            // valid key=value
+            // valid key=value pair
             Some((key, value)) if !key.is_empty() && !value.is_empty() => {
                 let parsed = match value {
                     "true" | "yes" | "1" => PropertyValue::Bool(true),
@@ -114,7 +104,7 @@ fn handle_declarative(domain: &str, parts: &[String]) {
                         .map(PropertyValue::Number)
                         .unwrap_or_else(|_| PropertyValue::String(value.to_string())),
                 };
-                // This part prevents from having the same property/key multiple times
+                // reject duplicate properties — last-write-wins would silently hide typos
                 if properties.contains_key(key) {
                     println!(
                         "✗ Error: Duplicated property '{}' — check '{} help'",
@@ -124,17 +114,15 @@ fn handle_declarative(domain: &str, parts: &[String]) {
                 }
                 properties.insert(key.to_string(), parsed);
             }
-            // =value or = (no key)
             Some((key, _)) if key.is_empty() => {
                 println!("✗ Error: Invalid property — check '{} help'", domain);
                 return;
             }
-            // key= (no value)
             Some(_) => {
                 println!("✗ Error: Invalid property value — check '{} help'", domain);
                 return;
             }
-            // no '=' at all — prop written without assignment
+            // token has no '=' at all
             None => {
                 println!(
                     "✗ Error: Property must be in key=value format — check '{} help'",
@@ -150,9 +138,13 @@ fn handle_declarative(domain: &str, parts: &[String]) {
         return;
     }
 
-    if let Err(e) = process_tri_intent(domain, action, target, properties) {
-        print!("✗ Error: ");
-        print_lines(e);
+    // match handles both Ok and Err — never drop output silently
+    match process_tri_intent(domain, action, target, properties) {
+        Ok(output) => print_lines(output),
+        Err(errors) => {
+            print!("✗ Error: ");
+            print_lines(errors);
+        }
     }
 }
 
