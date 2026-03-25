@@ -9,4 +9,3 @@ shared_libs = { path = "../shared" }
 #network = { path = "../modules/network" }
 #package = { path = "../modules/package" }
 services = { path = "../modules/services" }
-logger = { path = "../modules/logger" }

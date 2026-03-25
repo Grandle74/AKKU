@@ -5,6 +5,5 @@ members = [
     "api",
     "engine",
     "modules/services",
-    "modules/logger",
 ]
 default-members = ["cli"]
