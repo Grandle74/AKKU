@@ -1,3 +1,5 @@
+// shared/src/lib.rs
+
 // This Library is used by the "Engine Planner & Executor" and also used by the "Modules State Helpers"
 // Since the Modules can't reach and use the Order type directly, this is the shared representation.
 //---------------------This Comment isn't verified, yet idk what to say--------------------------------

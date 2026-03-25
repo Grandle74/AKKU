@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+chrono = "0.4.44"
+serde_json = "1.0.149"
 shared_libs = { path = "../shared" }
 #fs = { path = "../modules/fs" }
 #network = { path = "../modules/network" }

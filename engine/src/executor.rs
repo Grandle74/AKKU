@@ -48,16 +48,16 @@ fn execute_services_plan(plan: &Plan) -> Result<Vec<String>, Vec<String>> {
     let mut output = vec![];
     for step in &plan.steps {
         match &step.action {
-            Action::Custom(a) => {
+            Action::Custom(action) => {
                 let target = &Some(vec![step.target.clone()]);
-                let result = match a.as_str() {
+                let result = match action.as_str() {
                     "start" => services::start_service(target),
                     "stop" => services::stop_service(target),
                     "enable" => services::enable_service(target),
                     "disable" => services::disable_service(target),
                     "mask" => services::mask_service(target),
                     "unmask" => services::unmask_service(target),
-                    _ => return Err(vec![format!("Unknown step '{}'", a)]),
+                    _ => return Err(vec![format!("Unknown step '{}'", action)]),
                 };
                 match result {
                     Ok(mut out) => output.append(&mut out),
