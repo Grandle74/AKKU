@@ -4,13 +4,13 @@
 // Since the Modules can't reach and use the Order type directly, this is the shared representation.
 //---------------------This Comment isn't verified, yet idk what to say--------------------------------
 //----------------------------Engine + Upper layers Types----------------------------------
-#[derive(Debug, Clone)]
+#[derive(serde::Deserialize, Debug, Clone)]
 pub enum Domain {
     Services,
     // Future: Packages, Users, Network...
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum Action {
     Meta(String),   // engine handles — keep as enum variant
     Config,         // engine handles — keep as enum variant
@@ -71,6 +71,7 @@ pub struct Delta {
 
 pub type Steps = Vec<Step>;
 
+#[derive(serde::Deserialize)]
 pub struct Step {
     pub domain: Domain,
     pub action: Action,

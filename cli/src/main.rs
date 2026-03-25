@@ -1,8 +1,8 @@
-// cli/src/main.rs
-use api::{PropertyValue, process_bi_intent, process_tri_intent};
+use api::{PropertyValue, approve_intent, process_bi_intent, process_tri_intent};
 use std::collections::HashMap;
 use std::io::{self, Write};
 
+// main(), show_help(), print_lines() — completely unchanged
 fn main() {
     println!("Welcome to YaST3 (prototype)!");
     println!(
@@ -62,22 +62,26 @@ fn handle_intent(parts: &[String]) {
     let domain = &parts[0];
 
     match parts.len() {
-        // domain only — no action given
         1 => println!("See '{} help' for more information.", domain),
 
-        // domain <action>  →  list, help, reset, ...
+        // Bi-intent: unchanged, still returns Vec<String> directly
         2 => match process_bi_intent(domain, &parts[1]) {
             Ok(output) => print_lines(output),
             Err(errors) => print_lines(errors),
         },
 
-        // domain <action> <target>  →  status nginx, start nginx, ...
+        // Tri-intent: now returns IntentResult — check for pending plan
         3 => match process_tri_intent(domain, parts[1].clone(), parts[2].clone(), HashMap::new()) {
-            Ok(output) => print_lines(output),
+            Ok(result) => {
+                print_lines(result.output);
+                // Custom actions (status, start, ...) never produce a plan.
+                // pending_plan is always None here — this branch is a no-op for now.
+                handle_pending_plan(result.pending_plan);
+            }
             Err(errors) => print_lines(errors),
         },
 
-        // domain <target> <action> <property>=<value> ...  →  declarative
+        // Declarative: domain <target> change <key>=<value> ...
         _ => handle_declarative(domain, parts),
     }
 }
@@ -92,9 +96,9 @@ fn handle_declarative(domain: &str, parts: &[String]) {
         return;
     }
 
+    // Property parsing — unchanged
     for token in &parts[3..] {
         match token.split_once('=') {
-            // valid key=value pair
             Some((key, value)) if !key.is_empty() && !value.is_empty() => {
                 let parsed = match value {
                     "true" | "yes" | "1" => PropertyValue::Bool(true),
@@ -104,7 +108,6 @@ fn handle_declarative(domain: &str, parts: &[String]) {
                         .map(PropertyValue::Number)
                         .unwrap_or_else(|_| PropertyValue::String(value.to_string())),
                 };
-                // reject duplicate properties — last-write-wins would silently hide typos
                 if properties.contains_key(key) {
                     println!(
                         "✗ Error: Duplicated property '{}' — check '{} help'",
@@ -122,7 +125,6 @@ fn handle_declarative(domain: &str, parts: &[String]) {
                 println!("✗ Error: Invalid property value — check '{} help'", domain);
                 return;
             }
-            // token has no '=' at all
             None => {
                 println!(
                     "✗ Error: Property must be in key=value format — check '{} help'",
@@ -138,8 +140,34 @@ fn handle_declarative(domain: &str, parts: &[String]) {
         return;
     }
 
-    // match handles both Ok and Err — never drop output silently
     match process_tri_intent(domain, action, target, properties) {
+        Ok(result) => {
+            print_lines(result.output);
+            // Config actions always return a pending plan — ask the user.
+            handle_pending_plan(result.pending_plan);
+        }
+        Err(errors) => {
+            print!("✗ Error: ");
+            print_lines(errors);
+        }
+    }
+}
+
+/// Handles the approval flow when a Config action produced a plan.
+/// Called after showing the plan output — asks the user yes/no, then acts.
+fn handle_pending_plan(pending_plan: Option<api::Plan>) {
+    let Some(plan) = pending_plan else { return };
+
+    // Ask the user for approval
+    print!("\nApply this plan? [y/N] ");
+    io::stdout().flush().unwrap();
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).unwrap();
+
+    let approved = matches!(input.trim().to_lowercase().as_str(), "y" | "yes");
+
+    match approve_intent(plan, approved) {
         Ok(output) => print_lines(output),
         Err(errors) => {
             print!("✗ Error: ");

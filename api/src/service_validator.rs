@@ -3,10 +3,10 @@ use crate::PropertyValue;
 use std::collections::HashMap;
 
 // Note!
-// In the SOONLY_FUTURE - validate Service specifiv ACTIONs HERE!!!
-// In the SOONLY_FUTURE - validate Service specifiv ACTIONs HERE!!!
-// In the SOONLY_FUTURE - validate Service specifiv ACTIONs HERE!!!
-// In the SOONLY_FUTURE - validate Service specifiv ACTIONs HERE!!!
+// In the SOONLY_FUTURE - validate Service specific ACTIONs HERE!!!
+// In the SOONLY_FUTURE - validate Service specific ACTIONs HERE!!!
+// In the SOONLY_FUTURE - validate Service specific ACTIONs HERE!!!
+// In the SOONLY_FUTURE - validate Service specific ACTIONs HERE!!!
 
 /// Validates all properties: known keys + correct value types.
 pub fn validate(properties: &HashMap<String, PropertyValue>) -> Result<(), String> {

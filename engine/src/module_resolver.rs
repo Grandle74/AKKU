@@ -1,6 +1,7 @@
 // engine/src/module_resolver.rs
 use crate::Domain;
 
+#[derive(serde::Deserialize, Clone)]
 pub enum ModuleId {
     Services,
     // Network,

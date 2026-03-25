@@ -1,11 +1,16 @@
 use crate::{Order, PropertyValue, module_resolver::ModuleId};
+use serde;
 use shared_libs::Steps;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+/// A generated execution plan.
+/// Carries its own module_id so approve_plan() can dispatch without extra parameters.
+#[derive(serde::Deserialize)]
 pub struct Plan {
-    pub id: String, // added
+    pub id: String,
+    pub module_id: ModuleId, // needed by executor to dispatch to the right module
     pub target: String,
     pub output: String,
     pub steps: Steps,
@@ -17,6 +22,8 @@ impl Plan {
         PathBuf::from(home).join(".yast3").join("plans")
     }
 
+    /// Persists plan to disk immediately after creation.
+    /// Steps saved as descriptions only — the live Steps stay in memory for execution.
     pub fn save(&self) -> Result<(), String> {
         fs::create_dir_all(Self::plans_dir()).map_err(|e| e.to_string())?;
 
@@ -24,10 +31,7 @@ impl Plan {
             "id": self.id,
             "target": self.target,
             "status": "pending",
-            "steps": self.steps
-                .iter()
-                .map(|s| s.description.clone())
-                .collect::<Vec<_>>(),
+            "steps": self.steps.iter().map(|s| s.description.clone()).collect::<Vec<_>>(),
         });
 
         let path = Self::plans_dir().join(format!("{}.plan.json", self.id));
@@ -39,8 +43,11 @@ impl Plan {
     }
 }
 
-// ── ID generation ────────────────────────────────────────────────────────────
+// ── ID Generation ────────────────────────────────────────────────────────────
 
+/// Generates a human-readable, sortable, collision-resistant plan ID.
+/// Format: <domain_prefix>_<YYYYMMDD>_<HHMMSS>_<4hex>
+/// Example: svc_20260325_143022_a3f2
 fn generate_id(prefix: &str) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -57,10 +64,10 @@ fn module_prefix(module: &ModuleId) -> &'static str {
     match module {
         ModuleId::Services => "svc",
         // ModuleId::Network => "net",
-    } 
+    }
 }
 
-// ── Public entry point ───────────────────────────────────────────────────────
+// ── Public Entry ─────────────────────────────────────────────────────────────
 
 pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Plan, String> {
     let target = order.target.clone().ok_or("No target")?;
@@ -81,17 +88,18 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Plan, String> {
     );
 
     let plan = Plan {
-        id: generate_id(module_prefix(module)), // added
+        id: generate_id(module_prefix(module)),
+        module_id: module.clone(), // stored so approve_plan() needs no extra params
         target,
         output,
         steps,
     };
 
-    plan.save()?; // added - saves right after creation
+    plan.save()?; // persist immediately — audit trail starts at creation
     Ok(plan)
 }
 
-// ── Module-specific planners ─────────────────────────────────────────────────
+// ── Module-Specific Planners ─────────────────────────────────────────────────
 
 fn plan_services(target: String, props: &HashMap<String, PropertyValue>) -> Result<Steps, String> {
     let current_state = services::state_helpers::ServiceCurrentState::new(&target)?;

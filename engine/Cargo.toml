@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 chrono = "0.4.44"
 serde_json = "1.0.149"
+serde = { version = "1.0.228", features = ["derive"] }
 shared_libs = { path = "../shared" }
 #fs = { path = "../modules/fs" }
 #network = { path = "../modules/network" }

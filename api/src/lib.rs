@@ -1,29 +1,37 @@
-// api/src/lib.rs
-pub use engine::PropertyValue;
-use engine::{Action, Domain, Order, execute_order};
+use engine::{approve_plan as engine_approve, execute_order, Action, Domain, Order};
+pub use engine::{EngineResult, Plan, PropertyValue};
 use std::collections::HashMap;
+
 mod service_validator;
 
-/// Intent with no target (list, help, reset, ...)
+/// Returned by process_tri_intent.
+/// When pending_plan is Some, the frontend must ask for approval
+/// and call approve_intent() with the user's decision.
+/// When None, output is final — no further action needed.
+pub use engine::EngineResult as IntentResult;
+
+// ── Public API ───────────────────────────────────────────────────────────────
+
+/// Intent with no target (list, help, reset, ...).
+/// Always executes immediately — no planning, no approval.
 pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<String>, Vec<String>> {
     let domain = parse_domain(domain_str).map_err(|e| vec![e])?;
     let action = parse_action(action_str).map_err(|e| vec![e])?;
 
     match action {
-        Action::Meta(_) =>
-        // Execution Result of execute_order is ignored temporarily
-        {
-            execute_order(
+        Action::Meta(_) => {
+            // Meta actions are fire-and-forget — result is always final.
+            let result = execute_order(
                 Order {
                     domain,
                     action,
                     target: None,
                     desired_properties: HashMap::new(),
                 },
-                false, // dry run
-            )
+                false,
+            )?;
+            Ok(result.output) // pending_plan is always None here
         }
-
         _ => Err(vec![format!(
             "✗ Invalid command — see '{} help'",
             domain_str
@@ -31,13 +39,15 @@ pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<Strin
     }
 }
 
-/// Intent with a target, and optionally desired properties (status, start, change, ...)
+/// Intent with a target and optional properties (status, start, config, ...).
+/// Config actions return a pending plan — caller must handle approval.
+/// All other actions return final output with no pending plan.
 pub fn process_tri_intent(
     domain_str: &str,
     action_str: String,
     target: String,
     properties: HashMap<String, PropertyValue>,
-) -> Result<Vec<String>, Vec<String>> {
+) -> Result<IntentResult, Vec<String>> {
     let domain = parse_domain(domain_str).map_err(|e| vec![e])?;
     let action = parse_action(&action_str).map_err(|e| vec![e])?;
 
@@ -55,9 +65,10 @@ pub fn process_tri_intent(
                     domain_str
                 )]);
             }
+            // Conflict validation happens at API level — before touching the engine.
             validate_conflicts(domain.clone(), &properties).map_err(|e| vec![e])?;
         }
-        Action::Custom(_) => {} // fine, just execute
+        Action::Custom(_) => {} // no pre-validation needed, execute directly
     }
 
     execute_order(
@@ -67,11 +78,18 @@ pub fn process_tri_intent(
             target: Some(target),
             desired_properties: properties,
         },
-        false, // dry run
+        false,
     )
 }
-// ── Conflict validation — dispatches per domain ──────────────────────────────
-// Alhamdulillah ── it's located in the actual Module Crate
+
+/// Trip 2 — Send user's approval decision to the engine.
+/// Call this only when process_tri_intent returned a pending_plan.
+pub fn approve_intent(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<String>> {
+    engine_approve(plan, approved)
+}
+
+// ── Conflict Validation ───────────────────────────────────────────────────────
+
 fn validate_conflicts(
     domain: Domain,
     properties: &HashMap<String, PropertyValue>,
