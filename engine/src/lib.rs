@@ -36,7 +36,11 @@ pub fn execute_order(order: Order, dry_run: bool) -> Result<Vec<String>, Vec<Str
             // Collect plan output if planning succeeded
             match &plan {
                 Ok(plan_output) => output.push(plan_output.output.clone()),
-                Err(_) => return Err(vec!["Failed to plan".to_string()]),
+                Err(e) => {
+                    let mut e = e.clone();
+                    e.extend(vec!["Failed to plan.".to_string()]);
+                    return Err(e);
+                }
             }
 
             // 3. Dry run
