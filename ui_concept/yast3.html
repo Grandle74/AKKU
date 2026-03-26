@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YaST3 — Yet Another Setup Tool</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --green:        #163d30;
+  --green-dark:   #0e2820;
+  --green-mid:    #1f5540;
+  --green-light:  #e8f1ec;
+  --yellow:       #e8b84b;
+  --yellow-dim:   rgba(232,184,75,0.15);
+  --bg:           #f3f4f0;
+  --surface:      #ffffff;
+  --text:         #141a15;
+  --muted:        #5e6b61;
+  --subtle:       #8d9b8f;
+  --border:       #dce3d9;
+  --border-dark:  #c8d3c4;
+  --sidebar-w:    248px;
+  --header-h:     54px;
+  --f:            'Outfit', sans-serif;
+  --sh-sm:        0 1px 2px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.04);
+  --sh-md:        0 3px 12px rgba(22,61,48,0.09), 0 1px 3px rgba(0,0,0,0.05);
+  --sh-lg:        0 8px 28px rgba(22,61,48,0.13), 0 2px 6px rgba(0,0,0,0.05);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: var(--f);
+  background: var(--bg);
+  color: var(--text);
+  display: flex; flex-direction: column;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── GLOBAL HEADER ── */
+.g-header {
+  height: var(--header-h);
+  background: var(--green-dark);
+  display: flex; align-items: stretch;
+  flex-shrink: 0;
+  position: sticky; top: 0; z-index: 200;
+  border-bottom: 2px solid var(--yellow);
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.025) 0%, transparent 100%);
+}
+
+.h-left {
+  display: flex; align-items: center;
+  width: var(--sidebar-w); flex-shrink: 0;
+  padding: 0 20px; gap: 13px;
+  transition: width 0.3s cubic-bezier(0.4,0,0.2,1);
+  overflow: hidden;
+}
+.h-left.slim { width: 0; padding: 0; }
+
+.otter-slot {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  background: #c97a1a; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 1.5px rgba(232,184,75,0.5), 0 2px 8px rgba(0,0,0,0.35);
+}
+.otter-slot img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.otter-fallback { display: none; font-size: 16px; }
+
+.brand-text { display: flex; flex-direction: column; gap: 2px; line-height: 1; white-space: nowrap; overflow: hidden; }
+
+/*
+  Brand name — same recipe as "Linux" on the right:
+  pure Outfit 700, single size, no tricks.
+  The only difference: S is yellow (the one historic touch
+  that's already established in YaST identity).
+  "3" is written inline at the same size, weight 400,
+  color rgba(255,255,255,0.38) — reads as a suffix, not math.
+*/
+.brand-name {
+  font-family: var(--f);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+  color: rgba(255,255,255,0.90);
+  display: flex; align-items: baseline;
+}
+.brand-name .s   { color: var(--yellow); }
+.brand-name .ver {
+  font-weight: 400;
+  font-size: 15px;
+  color: rgba(255,255,255,0.32);
+  margin-left: 2px;
+}
+
+.brand-sub {
+  font-family: var(--f); font-size: 8.5px; font-weight: 400;
+  color: rgba(255,255,255,0.5); letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.h-div { width: 1px; margin: 10px 0; background: rgba(255,255,255,0.1); flex-shrink: 0; }
+
+.h-right {
+  display: flex; align-items: center;
+  gap: 16px; padding: 0 22px; flex: 1; overflow: hidden;
+}
+
+/* Distro — identical recipe to brand-name, just different content */
+.distro-block { display: flex; flex-direction: column; gap: 2px; line-height: 1; }
+.distro-name {
+  font-family: var(--f); font-size: 15px; font-weight: 700;
+  color: rgba(255,255,255,0.88); letter-spacing: -0.1px;
+}
+.distro-meta {
+  font-family: var(--f); font-size: 8.5px; font-weight: 400;
+  color: rgba(255,255,255,0.5); letter-spacing: 2px; text-transform: uppercase;
+}
+
+.h-status { display: flex; gap: 6px; margin-left: auto; align-items: center; }
+.h-pill {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 4px;
+  font-family: var(--f); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.8px; text-transform: uppercase;
+}
+.h-pill-on { background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.18); color: #4ade80; }
+.h-pill-rt { background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.18); color: #f87171; }
+.h-pill-dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+
+/* ── SHELL ── */
+.shell { display: flex; flex: 1; min-height: 0; overflow: hidden; position: relative; }
+
+.collapse-tab {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  left: var(--sidebar-w);
+  width: 16px; height: 44px;
+  background: var(--surface);
+  border: 1px solid var(--border); border-left: none;
+  border-radius: 0 6px 6px 0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; z-index: 100; color: var(--subtle);
+  box-shadow: 2px 0 6px rgba(0,0,0,0.06);
+  transition: left 0.3s cubic-bezier(0.4,0,0.2,1), color 0.15s, background 0.15s;
+  user-select: none;
+}
+.collapse-tab:hover { color: var(--green); background: var(--green-light); }
+.collapse-tab.closed { left: 0; }
+.collapse-tab svg { transition: transform 0.3s; }
+.collapse-tab.closed svg { transform: scaleX(-1); }
+
+/* ── SIDEBAR ── */
+.sidebar {
+  width: var(--sidebar-w); flex-shrink: 0;
+  background: var(--green);
+  display: flex; flex-direction: column;
+  height: calc(100vh - var(--header-h));
+  position: sticky; top: var(--header-h);
+  overflow-y: auto; overflow-x: hidden;
+  transition: width 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.25s;
+}
+.sidebar.hidden { width: 0; opacity: 0; pointer-events: none; }
+
+.nav-group { padding-top: 6px; }
+.nav-label {
+  padding: 14px 20px 5px;
+  font-family: var(--f); font-size: 8.5px; font-weight: 700;
+  color: rgba(255,255,255,0.4); letter-spacing: 3px; text-transform: uppercase;
+  white-space: nowrap; user-select: none;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 20px 8px 16px; cursor: pointer;
+  font-family: var(--f); font-size: 13px; font-weight: 500;
+  color: rgba(255,255,255,0.6);
+  border-left: 2.5px solid transparent;
+  transition: color 0.14s, background 0.14s, border-color 0.14s;
+  user-select: none; white-space: nowrap;
+}
+.nav-item:hover { color: rgba(255,255,255,0.88); background: rgba(255,255,255,0.05); border-left-color: rgba(255,255,255,0.15); }
+.nav-item.active { color: #fff; font-weight: 600; background: rgba(255,255,255,0.08); border-left-color: var(--yellow); }
+.n-icon { font-size: 12px; width: 17px; text-align: center; flex-shrink: 0; opacity: 0.6; transition: opacity 0.14s; }
+.nav-item.active .n-icon, .nav-item:hover .n-icon { opacity: 1; }
+.nav-sep { height: 1px; margin: 8px 16px 2px; background: rgba(255,255,255,0.06); }
+
+.sidebar-foot {
+  margin-top: auto; padding: 14px 14px 16px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.foot-label {
+  font-family: var(--f); font-size: 8px; font-weight: 700;
+  color: rgba(255,255,255,0.4); letter-spacing: 3px; text-transform: uppercase;
+  padding: 0 4px; margin-bottom: 8px;
+}
+.status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.stat-item {
+  background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 7px; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.stat-key { font-family: var(--f); font-size: 8px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: rgba(255,255,255,0.4); }
+.stat-val { font-family: var(--f); font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,0.75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-val.live  { color: #4ade80; }
+.stat-val.warn  { color: #f87171; }
+.stat-val.info  { color: var(--yellow); }
+.ver-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 4px 0; }
+.ver-num { font-family: var(--f); font-size: 10px; font-weight: 500; color: rgba(255,255,255,0.25); letter-spacing: 0.5px; }
+.ver-badge { padding: 2px 7px; border-radius: 3px; background: var(--yellow-dim); border: 1px solid rgba(232,184,75,0.3); font-family: var(--f); font-size: 9px; font-weight: 700; color: var(--yellow); letter-spacing: 1px; }
+
+/* ── MAIN ── */
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+
+.topbar {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 0 26px; height: 48px;
+  display: flex; align-items: center; gap: 14px;
+}
+.t-bc { display: flex; align-items: center; gap: 6px; font-family: var(--f); font-size: 13px; color: var(--subtle); font-weight: 500; white-space: nowrap; }
+.t-sep { color: var(--border); }
+.t-active { font-family: var(--f); color: var(--green); font-weight: 700; }
+.t-search { flex: 1; max-width: 300px; margin-left: auto; position: relative; }
+.t-si { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--subtle); font-size: 14px; pointer-events: none; }
+#search {
+  width: 100%; padding: 6px 12px 6px 32px;
+  background: var(--bg); border: 1.5px solid var(--border);
+  border-radius: 7px; font-family: var(--f); font-size: 13px; font-weight: 400; color: var(--text);
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+#search:focus { outline: none; border-color: var(--green-mid); box-shadow: 0 0 0 3px rgba(22,61,48,0.08); }
+#search::placeholder { font-family: var(--f); color: #b0b8ad; }
+
+/* ── CONTENT ── */
+.content { padding: 24px 24px 40px; flex: 1; overflow-y: auto; }
+
+.sysinfo-row { display: grid; grid-template-columns: repeat(6,1fr); gap: 10px; margin-bottom: 22px; animation: fadeUp 0.4s ease both; }
+.si-card { background: var(--surface); border: 1.5px solid var(--border); border-radius: 9px; padding: 12px 14px; box-shadow: var(--sh-sm); transition: border-color 0.18s, box-shadow 0.18s; }
+.si-card:hover { border-color: var(--border-dark); box-shadow: var(--sh-md); }
+.si-k { font-family: var(--f); font-size: 8.5px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--subtle); margin-bottom: 5px; }
+.si-v { font-family: var(--f); font-size: 13px; font-weight: 700; color: var(--green); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.sec-head { font-family: var(--f); font-size: 9px; font-weight: 700; color: var(--subtle); letter-spacing: 2.5px; text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; gap: 11px; }
+.sec-head::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px,1fr)); gap: 11px; align-items: start; }
+
+.card {
+  background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: 11px; padding: 17px 17px 14px;
+  cursor: pointer; position: relative; overflow: hidden;
+  contain: layout style; align-self: start;
+  transition: transform 0.2s cubic-bezier(0.34,1.4,0.64,1), box-shadow 0.2s, border-color 0.2s;
+  animation: fadeUp 0.4s ease both; box-shadow: var(--sh-sm);
+}
+.card:hover { transform: translateY(-2px); box-shadow: var(--sh-lg); border-color: var(--border-dark); }
+.card.active { border-color: var(--green-mid); box-shadow: var(--sh-lg); }
+
+.c-bar { position: absolute; top: 0; left: 0; bottom: 0; width: 3px; background: var(--yellow); border-radius: 0 2px 2px 0; transform: scaleY(0); transform-origin: bottom; transition: transform 0.22s cubic-bezier(0.34,1.4,0.64,1); }
+.card:hover .c-bar, .card.active .c-bar { transform: scaleY(1); }
+
+.c-body { display: flex; align-items: flex-start; gap: 12px; }
+.c-icon { width: 40px; height: 40px; border-radius: 9px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 17px; transition: transform 0.18s, box-shadow 0.18s; }
+.card:hover .c-icon, .card.active .c-icon { transform: scale(1.07); box-shadow: 0 3px 10px rgba(0,0,0,0.07); }
+.c-info { flex: 1; min-width: 0; }
+.c-label { font-family: var(--f); font-size: 13.5px; font-weight: 700; margin-bottom: 3px; letter-spacing: -0.1px; }
+.c-desc  { font-family: var(--f); font-size: 11.5px; color: var(--muted); line-height: 1.5; font-weight: 400; }
+.c-chev  { font-size: 18px; color: var(--border); transition: all 0.2s cubic-bezier(0.34,1.4,0.64,1); align-self: center; flex-shrink: 0; line-height: 1; }
+.card:hover .c-chev { color: var(--border-dark); }
+.card.active .c-chev { transform: rotate(90deg); color: var(--green-mid); }
+
+.c-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; margin-left: 52px; }
+.c-tag { font-family: var(--f); font-size: 9.5px; font-weight: 600; padding: 2px 7px; border-radius: 20px; letter-spacing: 0.2px; }
+
+.c-panel { display: none; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); animation: fadeUp 0.18s ease both; }
+.card.active .c-panel { display: block; }
+.c-detail { font-family: var(--f); font-size: 12px; color: var(--muted); margin-bottom: 11px; line-height: 1.65; }
+.c-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn { padding: 6px 14px; border-radius: 6px; font-family: var(--f); font-size: 11.5px; font-weight: 600; letter-spacing: 0.2px; cursor: pointer; border: none; transition: all 0.14s; }
+.btn-p { color: #fff; }
+.btn-p:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.btn-o { background: transparent; transition: background 0.14s; }
+.btn-g { background: transparent; color: var(--muted); border: 1.5px solid var(--border); font-family: var(--f); }
+.btn-g:hover { background: var(--bg); color: var(--text); border-color: var(--border-dark); }
+
+.empty { grid-column: 1/-1; text-align: center; padding: 56px 20px; color: var(--muted); font-family: var(--f); font-size: 13.5px; }
+.empty-icon { font-size: 32px; margin-bottom: 10px; opacity: 0.5; }
+
+/* ── FOOTER ── */
+.footer { padding: 11px 24px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; background: var(--surface); }
+.f-left { display: flex; align-items: center; gap: 8px; font-family: var(--f); font-size: 11px; color: var(--muted); font-weight: 500; }
+.f-badge { padding: 2px 7px; border-radius: 3px; background: var(--green-light); color: var(--green); font-family: var(--f); font-size: 9.5px; font-weight: 700; letter-spacing: 1px; }
+.f-sep { color: var(--border); }
+.f-right { font-family: var(--f); font-size: 11px; color: var(--subtle); font-weight: 400; font-style: italic; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-dark); }
+
+@media (max-width: 1100px) { .sysinfo-row { grid-template-columns: repeat(3,1fr); } }
+@media (max-width: 640px) {
+  .sysinfo-row { grid-template-columns: repeat(2,1fr); }
+  .content { padding: 16px 14px 30px; }
+  .h-right { display: none; }
+  .h-left { width: auto !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="g-header">
+
+  <div class="h-left" id="hLeft">
+    <div class="otter-slot">
+      <img src="icon.png" alt="YaST3"
+        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+      <span class="otter-fallback">🦦</span>
+    </div>
+    <div class="brand-text">
+      <div class="brand-name">Ya<span class="brand-name">S</span>T<span class="brand-name">3</span></div>
+      <div class="brand-sub">Yet Another Setup Tool</div>
+    </div>
+  </div>
+
+  <div class="h-div"></div>
+
+  <div class="h-right">
+    <div class="distro-block">
+      <div class="distro-name">Linux</div>
+      <div class="distro-meta">Kernel 6.8.9 · x86_64</div>
+    </div>
+    <div class="h-status">
+      <div class="h-pill h-pill-on"><span class="h-pill-dot"></span>Online</div>
+      <div class="h-pill h-pill-rt"><span class="h-pill-dot"></span>Root</div>
+    </div>
+  </div>
+
+</header>
+
+<div class="shell">
+
+  <div class="collapse-tab" id="collapseTab" onclick="toggleSidebar()" title="Toggle sidebar">
+    <svg width="8" height="12" viewBox="0 0 8 12" fill="none">
+      <path d="M6 1L1.5 6L6 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="nav-group">
+      <div class="nav-item active" style="margin-top:8px"><span class="n-icon">⌂</span>Home</div>
+    </div>
+    <div class="nav-sep"></div>
+    <div class="nav-group">
+      <div class="nav-label">Configuration</div>
+      <div class="nav-item" onclick="navClick(this,'Network')"><span class="n-icon">⬡</span>Network</div>
+      <div class="nav-item" onclick="navClick(this,'Users & Groups')"><span class="n-icon">◈</span>Users & Groups</div>
+      <div class="nav-item" onclick="navClick(this,'Storage')"><span class="n-icon">▣</span>Storage</div>
+      <div class="nav-item" onclick="navClick(this,'Software')"><span class="n-icon">◎</span>Software</div>
+    </div>
+    <div class="nav-sep"></div>
+    <div class="nav-group">
+      <div class="nav-label">System</div>
+      <div class="nav-item" onclick="window.location='services.html'"><span class="n-icon">⬡</span>Services</div>
+      <div class="nav-item" onclick="navClick(this,'Security')"><span class="n-icon">◆</span>Security</div>
+      <div class="nav-item" onclick="navClick(this,'Hardware')"><span class="n-icon">◉</span>Hardware</div>
+      <div class="nav-item" onclick="navClick(this,'Boot Loader')"><span class="n-icon">▶</span>Boot Loader</div>
+      <div class="nav-item" onclick="navClick(this,'System')"><span class="n-icon">◈</span>System</div>
+    </div>
+
+    <div class="sidebar-foot">
+      <div class="foot-label">System Status</div>
+      <div class="status-grid">
+        <div class="stat-item">
+          <div class="stat-key">Network</div>
+          <div class="stat-val live">● Connected</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-key">Session</div>
+          <div class="stat-val warn">Root</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-key">Pkg Manager</div>
+          <div class="stat-val">zypper</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-key">Uptime</div>
+          <div class="stat-val info">3h 42m</div>
+        </div>
+      </div>
+      <div class="ver-row">
+        <span class="ver-num">YaST3 · GPL-2.0</span>
+        <span class="ver-badge">v3.0.0</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="t-bc">
+        <span>YaST3</span>
+        <span class="t-sep">›</span>
+        <span class="t-active" id="tSection">All Modules</span>
+      </div>
+      <div class="t-search">
+        <span class="t-si">⌕</span>
+        <input type="text" id="search" placeholder="Search modules...">
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="sysinfo-row">
+        <div class="si-card" style="animation-delay:.00s"><div class="si-k">Hostname</div><div class="si-v">arch-dev</div></div>
+        <div class="si-card" style="animation-delay:.04s"><div class="si-k">Kernel</div><div class="si-v">6.8.9-arch1</div></div>
+        <div class="si-card" style="animation-delay:.08s"><div class="si-k">Architecture</div><div class="si-v">x86_64</div></div>
+        <div class="si-card" style="animation-delay:.12s"><div class="si-k">Pkg Manager</div><div class="si-v">zypper</div></div>
+        <div class="si-card" style="animation-delay:.16s"><div class="si-k">Uptime</div><div class="si-v">3h 42m</div></div>
+        <div class="si-card" style="animation-delay:.20s"><div class="si-k">Memory</div><div class="si-v">4.2 / 16 GB</div></div>
+      </div>
+
+      <div class="sec-head">All Modules</div>
+      <div class="grid" id="grid"></div>
+    </div>
+
+    <div class="footer">
+      <div class="f-left">
+        <span class="f-badge">YaST3</span>
+        <span>Community Edition</span>
+        <span class="f-sep">·</span>
+        <span>GPL-2.0</span>
+        <span class="f-sep">·</span>
+        <span>v3.0.0</span>
+      </div>
+      <div class="f-right">Built on the ashes of YaST2 🔥</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const MODULES = [
+  { id:"network",  icon:"⬡", label:"Network",        desc:"Interfaces, DNS, Firewall, Proxy, VPN",     bg:"#e5f2eb", color:"#163d30", tags:["TCP/IP","DNS","Firewall"],  detail:"Configure all network interfaces, DNS resolvers, firewall rules, proxy settings, and VPN connections." },
+  { id:"users",    icon:"◈", label:"Users & Groups",  desc:"Accounts, sudo, SSH keys, permissions",     bg:"#eceafa", color:"#4c3a8f", tags:["PAM","sudo","LDAP"],        detail:"Manage local users, groups, sudo rules, SSH authorized keys, and PAM authentication modules." },
+  { id:"storage",  icon:"▣", label:"Storage",         desc:"Partitions, LVM, RAID, NFS, BTRFS",         bg:"#fdf0f0", color:"#991b1b", tags:["LVM","BTRFS","RAID"],       detail:"Full disk and partition management including LVM volumes, software RAID, NFS mounts, and BTRFS subvolumes." },
+  { id:"software", icon:"◎", label:"Software",        desc:"Packages, repositories, updates, patterns", bg:"#fdfaec", color:"#7a3a0a", tags:["RPM","zypper","repos"],     detail:"Install, remove, and update packages. Manage repositories, software patterns, and automatic update policies." },
+  { id:"services", icon:"⬡", label:"Services",        desc:"Systemd units, boot targets, daemons",      bg:"#eef4fd", color:"#1e40af", tags:["systemd","targets","cron"], detail:"Start, stop, enable, and mask systemd services. Configure boot targets and scheduled tasks.", href:"services.html" },
+  { id:"security", icon:"◆", label:"Security",        desc:"SELinux, AppArmor, certificates, audit",    bg:"#fef6ee", color:"#9a3412", tags:["AppArmor","TLS","audit"],   detail:"Configure mandatory access control, manage TLS certificates, and review the system audit log." },
+  { id:"hardware", icon:"◉", label:"Hardware",        desc:"Drivers, kernel modules, firmware",         bg:"#fbf4fe", color:"#7e22ce", tags:["drivers","udev","DKMS"],    detail:"Detect hardware, manage kernel modules and firmware, configure udev rules and power management." },
+  { id:"boot",     icon:"▶", label:"Boot Loader",     desc:"GRUB2, EFI, kernel parameters, rescue",     bg:"#eefaf3", color:"#166534", tags:["GRUB2","EFI","initrd"],     detail:"Configure GRUB2 or systemd-boot, manage EFI entries, kernel parameters, and initrd images." },
+  { id:"system",   icon:"◈", label:"System",          desc:"Hostname, locale, timezone, language",      bg:"#ebfaf5", color:"#065f46", tags:["locale","NTP","hostname"],  detail:"Set system hostname, locale, keyboard layout, timezone, and NTP time synchronization." },
+];
+
+let activeCard = null;
+let sidebarOpen = true;
+
+function renderGrid(filter = "") {
+  const grid = document.getElementById("grid");
+  const q = filter.toLowerCase();
+  const list = MODULES.filter(m =>
+    !q || m.label.toLowerCase().includes(q) || m.desc.toLowerCase().includes(q) || m.tags.some(t => t.toLowerCase().includes(q))
+  );
+  if (!list.length) {
+    grid.innerHTML = `<div class="empty"><div class="empty-icon">⌕</div>No modules match "<strong>${filter}</strong>"</div>`;
+    return;
+  }
+  grid.innerHTML = list.map((m, i) => `
+    <div class="card ${activeCard===m.id?'active':''}" id="card-${m.id}" onclick="toggleCard('${m.id}')" style="animation-delay:${i*.04}s">
+      <div class="c-bar"></div>
+      <div class="c-body">
+        <div class="c-icon" style="background:${m.bg};color:${m.color}">${m.icon}</div>
+        <div class="c-info">
+          <div class="c-label" style="color:${m.color}">${m.label}</div>
+          <div class="c-desc">${m.desc}</div>
+        </div>
+        <div class="c-chev">›</div>
+      </div>
+      <div class="c-tags">
+        ${m.tags.map(t=>`<span class="c-tag" style="background:${m.bg};color:${m.color};border:1px solid ${m.color}22">${t}</span>`).join('')}
+      </div>
+      <div class="c-panel">
+        <p class="c-detail">${m.detail}</p>
+        <div class="c-actions">
+          <button class="btn btn-p" style="background:${m.color};box-shadow:0 2px 8px ${m.color}30"
+            onmouseover="this.style.filter='brightness(1.1)'" onmouseout="this.style.filter=''"
+            onclick="event.stopPropagation();${m.href?`window.location='${m.href}'`:''}">Configure</button>
+          <button class="btn btn-o" style="color:${m.color};border:1.5px solid ${m.color}30"
+            onmouseover="this.style.background='${m.bg}'" onmouseout="this.style.background='transparent'">Status</button>
+          <button class="btn btn-g">Logs</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function toggleCard(id) { activeCard = (activeCard===id)?null:id; renderGrid(document.getElementById("search").value); }
+
+function navClick(el, label) {
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tSection').textContent = label;
+}
+
+function toggleSidebar() {
+  sidebarOpen = !sidebarOpen;
+  document.getElementById('sidebar').classList.toggle('hidden', !sidebarOpen);
+  document.getElementById('hLeft').classList.toggle('slim', !sidebarOpen);
+  const tab = document.getElementById('collapseTab');
+  tab.classList.toggle('closed', !sidebarOpen);
+  tab.style.left = sidebarOpen ? 'var(--sidebar-w)' : '0';
+}
+
+document.getElementById("search").addEventListener("input", e => renderGrid(e.target.value));
+renderGrid();
+</script>
+</body>
+</html>
