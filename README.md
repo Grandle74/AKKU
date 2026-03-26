@@ -1,423 +1,202 @@
-# YaST3 Prototype: Service Module Implementation
+# YaST3
+> **Codename: Project ANU** — A declarative system configuration engine written in Rust.
 
-[![Status](https://img.shields.io/badge/status-early%20prototype-orange.svg)]()
+[![Status](https://img.shields.io/badge/status-active%20prototype-orange.svg)]()
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
-[![Research](https://img.shields.io/badge/purpose-research-blue.svg)]()
+[![License](https://img.shields.io/badge/license-TBD-lightgrey.svg)]()
 
-> **Early prototype exploring safety-first system configuration**  
-> *Implementing core concepts from the YaST3 design specification*
+---
 
-This is a **proof-of-concept implementation** of the Service Module from YaST3 (Yet Another Setup Tool 3). The goal is to validate the safety model and operational workflow described in the design document through working code, not to create a production-ready tool.
+## What Is This?
 
-## 📋 What This Is
-
-This prototype explores whether the theoretical safety model described in the [YaST3 design document](docs/System_Design_Overview.pdf) can work in practice. I'm testing core concepts through a focused implementation:
-
-- **Explicit State Management**: Separating "what we want" from "what exists"
-- **Safe Execution**: Simulating before modifying (dry-run)
-- **Automatic Rollback**: Planning recovery before execution
-- **Structured Reporting**: Machine-readable outcomes instead of log parsing
-
-**Current Status**: The service module demonstrates the workflow. Many components are simplified or stubbed. This is intentionally limited in scope to validate the core ideas.
-
-## 🎯 Problem Statement
-
-Modern system configuration tools execute changes with limited visibility and poor recovery mechanisms. Common issues include:
-
-- No preview of planned changes before execution
-- Partial failures leaving systems in inconsistent states
-- Manual or absent rollback procedures
-- Difficulty diagnosing failures across different tools
-
-YaST3 addresses these by making safety, simulation, and recovery integral to every operation.
-
-## 🔬 Why This Prototype Exists
-
-I built this to answer specific questions about the YaST3 design:
-
-1. **Can you really plan rollbacks before execution?** Yes - by modeling actions as reversible operations
-2. **Is dry-run simulation accurate?** Partially - detecting conflicts works well, but predicting all failures is hard
-3. **Does structured reporting help?** Definitely - much clearer than parsing systemd logs
-4. **What's the performance cost?** Minimal for planning; most time is in actual system operations
-
-**What I've Learned**:
-- State inspection is more complex than expected (services have many hidden dependencies)
-- Rollback planning requires deep knowledge of system behavior
-- Some operations are inherently non-reversible (need better modeling)
-- The core workflow (inspect → plan → simulate → apply) feels right
-
-**Open Questions**:
-- How to handle cross-module dependencies (services that need network config)?
-- Best way to represent partial success scenarios?
-- Can this scale to distributed systems?
-
-## ⚙️ What's Implemented (So Far)
-
-### Working
-- ✅ **Inspect**: Basic service state detection (running, enabled, installed)
-- ✅ **Plan**: Ordered action generation for simple scenarios
-- ✅ **Dry-run**: Conflict detection (port conflicts, missing packages)
-- ✅ **Apply**: Sequential execution with progress tracking
-- ✅ **Rollback**: Works for failed installations (removes package, stops service)
-- ✅ **Report**: JSON output with execution summary
-
-### Partially Working
-- ⚠️ **Complex Dependencies**: Service chains (A requires B) not fully handled
-- ⚠️ **Configuration Files**: Can detect changes but not merge or validate syntax
-- ⚠️ **Rollback Edge Cases**: Some operations can't be cleanly reversed
-
-### Not Yet Implemented
-- ❌ Multi-module coordination (service + firewall + network)
-- ❌ Distributed execution across multiple hosts
-- ❌ Transaction logging and audit trails
-- ❌ Policy validation (security rules, compliance checks)
-- ❌ Advanced error recovery strategies
-
-## 🏗️ Architecture
+YaST3 is a **system configuration engine** that lets you express the *desired state* of your system rather than issuing imperative commands. You describe what you want; the engine figures out how to get there safely.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    CLI Frontend                     │
-└────────────────────┬────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────┐
-│                    API Layer                        │
-│          (Intent Validation & Routing)              │
-└────────────────────┬────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────┐
-│                  Core Engine                        │
-│   • State Inspector    • Action Planner             │
-│   • Dry-run Engine     • Execution Controller       │
-│   • Rollback Manager   • Report Generator           │
-└────────────────────┬────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────┐
-│                 Service Module                      │
-│   • State Detection    • Action Translation         │
-│   • Validation Logic   • System Tool Wrapper        │
-└────────────────────┬────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────┐
-│           System Tools (systemctl, etc)             │
-└─────────────────────────────────────────────────────┘
+# Imperative (old way)
+$ systemctl enable nginx
+$ systemctl start nginx
+
+# Declarative (YaST3 way)
+> service nginx running=true enabled=true
 ```
 
-## 🚀 Running the Prototype
+The engine inspects current state, plans the minimal steps to reach the desired state, validates for conflicts before touching anything, and executes in the correct order.
+
+---
+
+## Architecture
+
+```
+Frontend (CLI)
+     ↓
+  API Layer          — intent parsing, input validation, conflict detection
+     ↓
+  Core Engine        — state inspection, planning, execution
+     ↓
+  Modules            — domain-specific logic (services, network, users…)
+     ↓
+  System Tools       — systemctl, ip, useradd, etc.
+```
+
+The frontend is **replaceable by design**. `commando` (see below) is the reference CLI used during development — but any interface that speaks to the API layer works.
+
+---
+
+## Current State
+
+| Component            | Status                          |
+|----------------------|---------------------------------|
+| CLI (`commando`)     | ✅ Working                      |
+| API layer            | ✅ Working                      |
+| Core engine          | ✅ Working                      |
+| Services module      | ✅ Working                      |
+| Declarative syntax   | 🔄 In progress                  |
+| Conflict detection   | 🔄 In progress                  |
+| Rollback             | ❌ Not yet implemented          |
+| Other modules        | ❌ Not yet implemented          |
+
+**What works today:**
+
+```
+> service list
+> service status nginx
+> service start nginx
+> service enable nginx
+> service stop nginx
+> service disable nginx
+> service mask nginx
+> service unmask nginx
+```
+
+**What's being added:**
+
+```
+# Declarative state (specify end state, not actions)
+> service nginx running=true enabled=true
+
+# Conflict detection (validated before execution)
+> service nginx enabled=true masked=true
+✗ Conflict: cannot enable a masked service. Unmask it first.
+```
+
+---
+
+## Design Goals
+
+### 1. Declarative over Imperative
+Users specify the desired end state. The engine resolves the correct sequence of actions automatically — including ordering (e.g. unmask → enable → start) and avoiding impossible states.
+
+### 2. Conflict Detection Before Execution
+Impossible or contradictory states are caught at the API layer before any system call is made.
+
+```
+enabled=true  +  masked=true    → error
+running=true  +  masked=true    → error
+```
+
+### 3. Generalized Module System
+The API and engine are domain-agnostic. The services module is the first implementation, but the same pipeline handles any future module — network, users, firewall — without changes to the core.
+
+### 4. Safe Execution
+Before touching the system, the engine knows:
+- What the current state is
+- What steps are needed
+- In what order
+- What rollback would look like *(planned)*
+
+---
+
+## `commando` — The Reference Frontend
+
+`commando` is a minimal CLI that exercises the full stack. It is **not** the final user-facing interface — it exists so that:
+
+- Developers can test the engine and modules directly
+- Module authors have a working reference to build against
+- The frontend contract stays honest (if it's hard to use via CLI, the API is wrong)
+
+```bash
+cargo run --bin commando
+commando(v0.1)~> service status nginx
+commando(v0.1)~> service nginx running=true enabled=true
+```
+
+Anyone building a frontend (TUI, web UI, daemon, etc.) should use `commando` as the reference for how the API behaves.
+
+---
+
+## Getting Started
 
 ### Prerequisites
-- Rust 1.75+ (install via [rustup](https://rustup.rs/))
-- Linux with systemd (tested on Ubuntu 22.04, Fedora 38)
-- Root/sudo access (the prototype actually modifies system state)
+- Rust 1.75+ — install via [rustup](https://rustup.rs/)
+- Linux with systemd
+- `sudo` access (required for actual system operations)
 
-### Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/yast3-prototype
-cd yast3-prototype
-
-# Build (this will take a few minutes first time)
-cargo build --release
-
-# Run basic tests (safe, no system changes)
-cargo test
-```
-
-**⚠️ Warning**: The `apply` command makes real system changes. Test in a VM or container first.
-
-### Try It Out
+### Build & Run
 
 ```bash
-# See what would happen (safe - no changes)
-sudo ./target/release/yast3 dry-run examples/nginx.yaml
+git clone <repo-url>
+cd yast3
 
-# See the execution plan
-sudo ./target/release/yast3 inspect examples/nginx.yaml
+cargo build
 
-# Actually apply changes (modifies your system!)
-sudo ./target/release/yast3 apply examples/nginx.yaml
+# Launch the reference CLI
+cargo run --bin commando
 ```
 
-### Example Configuration
-
-Create a file `my-service.yaml`:
-
-```yaml
-service: nginx
-state:
-  installed: true
-  enabled: true
-  running: true
-  port: 80
-```
-
-### What You'll See
-
-The output shows each phase of the workflow. Here's what a successful run looks like:
-
-```
-┌─ Inspection ─────────────────────────────────────┐
-│ nginx: not installed                             │
-│ service: not running                             │
-│ port 80: available                               │
-└──────────────────────────────────────────────────┘
-
-┌─ Planned Actions ────────────────────────────────┐
-│ 1. Install nginx package                         │
-│ 2. Enable nginx service at boot                  │
-│ 3. Start nginx service                           │
-└──────────────────────────────────────────────────┘
-
-┌─ Dry-run ────────────────────────────────────────┐
-│ ✓ Would install nginx                            │
-│ ✓ Would enable service at boot                   │
-│ ✓ Would start service                            │
-│                                                  │
-│ No conflicts detected                            │
-└──────────────────────────────────────────────────┘
-
-Apply changes? [y/N]: y
-
-┌─ Execution ──────────────────────────────────────┐
-│ [1/3] Installing nginx... ✓                      │
-│ [2/3] Enabling service... ✓                      │
-│ [3/3] Starting service... ✓                      │
-│                                                  │
-│ Duration: 842ms                                  │
-│ Status: SUCCESS                                  │
-└──────────────────────────────────────────────────┘
-```
-
-**Note**: Actual system tools (apt/dnf, systemctl) handle the real work. This prototype just orchestrates them safely.
-
-## 📊 What's Interesting Here
-
-### Design Choices
-- **Pre-execution Validation**: All checks happen before touching the system. This catches many issues early but can't predict everything (external dependencies, race conditions).
-- **Rollback as Data**: Rollback plans are generated during planning phase, stored alongside forward actions. Makes rollback automatic but increases memory usage.
-- **Module Isolation**: Service module doesn't know about packages directly - it requests actions and the core routes them. Clean but adds indirection.
-- **No DSL**: Using plain YAML for now. Considered a custom language but kept it simple for the prototype.
-
-### Current Limitations
-- **Single-host only**: No distributed coordination yet
-- **Sequential execution**: Actions run one at a time (safe but slow)
-- **Limited conflict detection**: Checks ports and packages, but not all resource conflicts
-- **Basic rollback**: Works for simple cases, struggles with cascading failures
-- **No state persistence**: Reports are ephemeral (not stored)
-
-### Why Rust?
-- Memory safety without garbage collection (important for system tools)
-- Strong type system catches many errors at compile time
-- Performance close to C (though this prototype doesn't push limits)
-- Good ecosystem for CLI tools (clap, serde, tokio)
-
-**Honest assessment**: The safety model works for the happy path. Edge cases and distributed scenarios need more thought.
-
-## 🧪 Testing
-
-```bash
-# Unit tests (safe, no system changes)
-cargo test
-
-# See test output
-cargo test -- --nocapture
-
-# Test specific module
-cargo test service_module::
-```
-
-**Integration tests exist but are commented out** - they require root and actually modify the system. Uncomment at your own risk if testing in a VM.
-
-**Coverage**: Unit tests cover the core logic. Integration testing is manual right now (need to set up proper test fixtures).
-
-## 🐛 Known Issues
-
-Being honest about current problems:
-
-- **Error messages are cryptic**: Need better error types and context
-- **Rollback isn't fully tested**: Works in simple cases, but complex scenarios untested
-- **Port conflict detection is naive**: Only checks if port is bound, not if it's *going* to be
-- **No concurrent execution**: Everything runs sequentially (safe but slow)
-- **Configuration file handling**: Can detect changes but not validate syntax or merge configs
-- **Memory usage**: Storing full rollback plans in memory could be problematic for large operations
-- **No cleanup**: Failed operations leave temporary state (should auto-cleanup)
-
-These aren't bugs to fix later - they're fundamental questions about the design that I haven't solved yet.
-
-## 🔄 Next Steps
-
-### Immediate Priorities (if continuing)
-- [ ] Better error types (current error handling is too generic)
-- [ ] State persistence (save reports to disk)
-- [ ] More service examples (postgres, redis with config files)
-- [ ] Improve rollback for config file changes
-- [ ] Add proper logging (using `tracing` crate)
-
-### Interesting Extensions
-- [ ] Package module (manage packages independently of services)
-- [ ] User module (test the workflow with different resource types)
-- [ ] Multi-service dependencies (nginx → depends → postgres)
-- [ ] Compare this approach with Ansible/Salt (benchmarking)
-
-### Research Directions
-- [ ] Formal verification of rollback correctness
-- [ ] Distributed consensus for multi-host changes
-- [ ] Learning optimal rollback strategies from failures
-- [ ] Integration with existing tools (Ansible playbooks → YaST3 plans)
-
-## 📚 Documentation
-
-- [System Design Overview](docs/System_Design_Overview.pdf) - Original design specification (not written by me)
-- [Implementation Notes](docs/implementation.md) - What differs from the spec and why *(planned)*
-- [Module API](docs/module_api.md) - How to add new modules *(in progress)*
-- Code comments - Check `src/core/` and `src/modules/service/` for inline documentation
-
-**Most documentation is still in the code itself.** This is a prototype, not a product.
-
-## 🤝 Why I'm Sharing This
-
-I built this prototype to:
-
-1. **Learn by doing**: Understanding system configuration by actually implementing safety mechanisms
-2. **Test the design**: See if the YaST3 spec's ideas hold up in real code
-3. **Get feedback**: Find out what I'm missing, what's naive, what could work better
-4. **Connect with people working on similar problems**: Declarative systems, safety-critical software, infrastructure automation
-
-**What I'm looking for**:
-- Guidance on where the design has fundamental flaws
-- Pointers to related research or production systems
-- Ideas for better testing strategies (especially for rollback correctness)
-- Opportunities to work on real distributed systems problems
-
-**What I'm interested in learning more about**:
-- Formal methods for verifying state transitions
-- Distributed consensus and coordination
-- How production config management systems actually work at scale
-- Better abstractions for representing system state
-
-I know this is rough and incomplete. That's kind of the point - it's easier to get good feedback on working code than on theoretical designs.
-
-## 🔗 Related Work & Inspiration
-
-This prototype borrows ideas from:
-
-- **Terraform/Pulumi**: The plan → apply workflow and state management
-- **Ansible**: Check mode (dry-run) and idempotent operations
-- **NixOS**: Declarative configuration and atomic rollback
-- **Kubernetes**: Desired state reconciliation and controllers
-- **Database transactions**: ACID properties applied to system changes
-
-**Key differences from existing tools**:
-- More emphasis on pre-execution validation (vs post-execution reconciliation)
-- Rollback as a first-class operation (vs snapshots or external tools)
-- Explicit separation of planning and execution (vs combined operations)
-
-**What I haven't figured out yet**:
-- How this compares performance-wise to established tools
-- Whether the safety overhead is worth it for simple changes
-- If the model extends to distributed systems without major redesign
-
-## 📬 Contact
-
-**Author**: [Your Name]  
-**Email**: your.email@example.com  
-**LinkedIn**: [Your Profile]  
-**Research Interests**: System safety, distributed systems, infrastructure automation
+> ⚠️ Commands that modify system state (start, enable, mask, etc.) require sudo. `status` and `list` do not.
 
 ---
 
-**⚠️ Prototype Status**: This is an early research prototype built for learning and validation. It makes real system changes but lacks production safeguards. Use in VMs or containers only.
+## Project Structure
 
-- **Grandle** and **Asperine** for the YaST3 design specification that inspired this
-- The Rust community for excellent documentation and helpful compiler errors
-- Everyone who's built configuration management tools before - I learned from your mistakes and successes
+```
+yast3/
+├── cli/              # commando — reference frontend
+├── api/              # Intent parsing, validation, conflict detection
+├── engine/           # Planner, executor, state inspection
+└── modules/
+    └── services/     # systemd service management
+```
+
+The plan is to eventually split these into separate repositories under a dedicated project organization once the architecture is stable.
 
 ---
 
-**⚠️ Prototype Status**: This is an early research prototype built for learning and validation. It makes real system changes but lacks production safeguards. Use in VMs or containers only.
+## What's Next
 
-**Feedback welcome**: If you spot something broken, naive, or interesting, I'd love to hear about it.
-
-// draft
-/*
-```
-
----
-
-## What This Gives You:
-
-### NOW (Prototype):
-```
-User: service start nginx
-API: Order { action: Start, target: nginx }
-Engine:
-  ├─ Plan: [Step: Start nginx]
-  ├─ Execute: start_service()
-  └─ (No rollback needed if success)
-```
-
-### LATER (Real System):
-```
-User: nginx should be running + enabled
-API: Order { desired: {running: true, enabled: true} }
-Engine:
-  ├─ Check current state
-  ├─ Plan: [Step1: Enable nginx, Step2: Start nginx]
-  ├─ Dry run: "Will enable nginx, then start it"
-  ├─ Execute both steps
-  └─ Rollback: [Disable nginx, Stop nginx] if failed
-```
-
-**Same engine structure, just smarter planner!**
+- **Declarative syntax** — full support for `service <name> key=value` style
+- **Conflict validation** — enforce impossible state rules at API level
+- **Rollback** — generate and store recovery steps during planning phase
+- **Network module** — first expansion beyond services
+- **Proper error types** — current error handling is too generic
 
 ---
 
-## Today's Work (if you have energy):
+## Honest Limitations
 
-### Option 1: Just Structure (30 mins)
-Create the files with empty/simple functions:
-```
-engine/
-├─ mod.rs        (your current execute_order)
-├─ planner.rs    (empty struct for now)
-├─ executor.rs   (empty struct for now)
-└─ rollback.rs   (empty struct for now)
+This is an active prototype. Known gaps:
 
-User: "nginx should be running and enabled"
+- Rollback is not implemented yet — failed operations do not auto-recover
+- Only the services module exists — no cross-module coordination
+- Sequential execution only — no parallelism
+- Error messages need work — some are still too generic
 
+These are known priorities, not surprises.
 
-Example of the Planner:
-Current State (queried):
-  - nginx: stopped, disabled
+---
 
-Desired State (from Order):
-  - nginx: running, enabled
+## Inspiration
 
-Difference:
-  - needs to be enabled
-  - needs to be started
+The design draws from:
+- **Terraform** — plan/apply workflow and explicit state management
+- **NixOS** — declarative configuration, atomic changes
+- **Ansible** — idempotency and check mode (dry-run)
+- **Kubernetes** — desired state reconciliation
 
-Generated Plan:
-  Step 1: Enable nginx
-  Step 2: Start nginx
+The key difference: YaST3 focuses on **pre-execution validation and planning** rather than post-execution reconciliation. Conflicts are caught before the system is touched.
 
-Rollback Plan (paired):
-  Step 1 rollback: Disable nginx
-  Step 2 rollback: Stop nginx
+---
 
-Frontend
-  ↓
-API (validates)
-  ↓
-Engine (plans, snapshots)
-  ├─ Planner: create_plan(from_state, to_state)
-  ├─ Snapshots: save/load states
-  └─ Executor: run plans
-     ↓
-Modules (query state, execute actions)
-  ├─ services::get_current_state()  ← calls systemctl
-  ├─ services::start_service()      ← calls systemctl
-  └─ services::enable_service()     ← calls systemctl
-     ↓
-System Tools (systemctl, etc.)
+## Status Note
+
+This repository is private and under active development. The architecture is stabilizing but not finalized. The naming situation is being handled separately — for now, **YaST3** is the working name and **ANU** is the project codename.
