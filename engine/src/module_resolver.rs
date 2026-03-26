@@ -8,6 +8,8 @@ pub enum ModuleId {
     // Users,
 }
 
+/// Maps a Domain to its corresponding ModuleId.
+/// The executor uses ModuleId to dispatch to the correct module implementation.
 pub fn resolve(domain: &Domain) -> Result<ModuleId, String> {
     match domain {
         // ------------------------------------------------------
@@ -17,6 +19,5 @@ pub fn resolve(domain: &Domain) -> Result<ModuleId, String> {
         // ------------------------------------------------------
         Domain::Services => Ok(ModuleId::Services),
         // Domain::Network => Ok(ModuleId::Network),
-        // _ => Err("Failed to resolve module.".to_string()),
     }
 }

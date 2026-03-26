@@ -1,11 +1,9 @@
-// modules/services/src/
-
-//use crate::error_catcher::validate_service_exists; <- sadly its return value cannot be used here <- idk what that comment means :/
+// modules/services/src/state_helpers.rs
 use shared_libs::{Delta, Domain, PropertyValue, Step, Steps};
 use std::collections::HashMap;
 use std::process::Command;
 
-// This struct represents the current state of a service, as reported by systemctl.
+/// The current state of a service as reported by systemctl.
 pub struct ServiceCurrentState {
     pub name: String,
     pub active: bool,
@@ -13,10 +11,11 @@ pub struct ServiceCurrentState {
     pub masked: bool,
 }
 
-// This struct represents the desired state of a service, as specified by the user.
+/// The desired state of a service as declared by the user via Config properties.
+/// `None` on a field means "don't care — leave it as-is".
 pub struct ServiceDesiredState {
     pub name: String,
-    pub active: Option<bool>, // None = "don't care"
+    pub active: Option<bool>,
     pub enabled: Option<bool>,
     pub masked: Option<bool>,
 }
@@ -30,7 +29,7 @@ impl ServiceCurrentState {
         Ok(Self {
             name: name.to_string(),
             active: Self::query_stdout(name, &["is-active", name]) == "active",
-            enabled: (enabled_out == "enabled" || enabled_out == "static"),
+            enabled: enabled_out == "enabled" || enabled_out == "static",
             masked: enabled_out == "masked",
         })
     }
@@ -63,7 +62,8 @@ impl ServiceDesiredState {
     }
 }
 
-// This function calculates the delta between the current and desired states of a service.
+/// Calculates the Delta between current and desired state.
+/// Only fields where desired differs from current produce a "needs_*" flag.
 pub fn calc(current: &ServiceCurrentState, desired: &ServiceDesiredState) -> Delta {
     Delta {
         target: Some(current.name.clone()),
@@ -76,7 +76,8 @@ pub fn calc(current: &ServiceCurrentState, desired: &ServiceDesiredState) -> Del
     }
 }
 
-// This function converts a delta into a list of steps to apply to the service.
+/// Converts a Delta into an ordered list of Steps.
+/// Order matters: unmask before enable, enable before start, etc.
 pub fn to_steps(delta: &Delta) -> Steps {
     let mut steps = vec![];
     let target = delta.target.as_deref().unwrap_or_default();

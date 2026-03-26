@@ -1,8 +1,8 @@
+// cli/src/main.rs
 use api::{PropertyValue, approve_intent, process_bi_intent, process_tri_intent};
 use std::collections::HashMap;
 use std::io::{self, Write};
 
-// main(), show_help(), print_lines() — completely unchanged
 fn main() {
     println!("Welcome to YaST3 (prototype)!");
     println!(
@@ -11,7 +11,7 @@ fn main() {
     );
     println!("Enter \"help\" for commands list\n");
 
-    'replay: loop {
+    'repl: loop {
         print!("commando(v0.1)~> ");
         io::stdout().flush().unwrap();
 
@@ -27,7 +27,7 @@ fn main() {
             "help" => show_help(),
             "exit" | "quit" => {
                 println!("Exiting...");
-                break 'replay;
+                break 'repl;
             }
             "clear" | "cls" => {
                 print!("\x1B[2J\x1B[1;1H");
@@ -64,30 +64,33 @@ fn handle_intent(parts: &[String]) {
     match parts.len() {
         1 => println!("See '{} help' for more information.", domain),
 
-        // Bi-intent: unchanged, still returns Vec<String> directly
+        // Bi-intent: domain + meta action only (list, help, reset)
         2 => match process_bi_intent(domain, &parts[1]) {
-            Ok(output) => print_lines(output),
+            Ok(output) => {
+                // should just work when resetting
+                // list and help do no show success mark
+                //print!("✔ ");
+                print_lines(output)
+            }
             Err(errors) => {
                 print!("✗ Error: ");
-                print_lines(errors)
+                print_lines(errors);
             }
         },
 
-        // Tri-intent: now returns IntentResult — check for pending plan
+        // Tri-intent: domain + action + target (status, start, stop, ...)
         3 => match process_tri_intent(domain, parts[1].clone(), parts[2].clone(), HashMap::new()) {
             Ok(result) => {
                 print_lines(result.output);
-                // Custom actions (status, start, ...) never produce a plan.
-                // pending_plan is always None here — this branch is a no-op for now.
                 handle_pending_plan(result.pending_plan);
             }
             Err(errors) => {
                 print!("✗ Error: ");
-                print_lines(errors)
+                print_lines(errors);
             }
         },
 
-        // Declarative: domain <target> change <key>=<value> ...
+        // Declarative: domain change <target> <key>=<value> ...
         _ => handle_declarative(domain, parts),
     }
 }
@@ -97,12 +100,11 @@ fn handle_declarative(domain: &str, parts: &[String]) {
     let target = parts[2].to_string();
     let mut properties = HashMap::new();
 
-    if action != "change" && action != "config" {
+    if action != "change" && action != "config" && action != "cfg" {
         println!("✗ Error: Invalid command — check '{} help'", domain);
         return;
     }
 
-    // Property parsing — unchanged
     for token in &parts[3..] {
         match token.split_once('=') {
             Some((key, value)) if !key.is_empty() && !value.is_empty() => {
@@ -149,7 +151,6 @@ fn handle_declarative(domain: &str, parts: &[String]) {
     match process_tri_intent(domain, action, target, properties) {
         Ok(result) => {
             print_lines(result.output);
-            // Config actions always return a pending plan — ask the user.
             handle_pending_plan(result.pending_plan);
         }
         Err(errors) => {
@@ -159,12 +160,11 @@ fn handle_declarative(domain: &str, parts: &[String]) {
     }
 }
 
-/// Handles the approval flow when a Config action produced a plan.
-/// Called after showing the plan output — asks the user yes/no, then acts.
+/// Handles the approval flow when a Config action produced a pending Plan.
+/// Asks the user yes/no, then forwards their decision to `approve_intent()`.
 fn handle_pending_plan(pending_plan: Option<api::Plan>) {
     let Some(plan) = pending_plan else { return };
 
-    // Ask the user for approval
     print!("\nApply this plan? [y/N]: ");
     io::stdout().flush().unwrap();
 
@@ -174,7 +174,10 @@ fn handle_pending_plan(pending_plan: Option<api::Plan>) {
     let approved = matches!(input.trim().to_lowercase().as_str(), "y" | "yes");
 
     match approve_intent(plan, approved) {
-        Ok(output) => print_lines(output),
+        Ok(output) => {
+            print!("✔ ");
+            print_lines(output)
+        }
         Err(errors) => {
             print!("✗ Error: ");
             print_lines(errors);
@@ -182,7 +185,6 @@ fn handle_pending_plan(pending_plan: Option<api::Plan>) {
     }
 }
 
-// Printing results helper
 fn print_lines<T: std::fmt::Display>(items: impl IntoIterator<Item = T>) {
     for item in items {
         println!("{}", item);

@@ -1,13 +1,12 @@
-use std::process::Command;
+// modules/services/src/lib.rs
+use std::process::{Command, Stdio};
 
-mod error_catcher;
 pub mod state_helpers;
+mod systemctl_queries;
 
-// this function prints, it needs to return instead!
-// (will work on it in the future when needed, in shaa' allah)
-pub fn status_service(args: Option<Vec<String>>) -> Result<Vec<String>, String> {
-    let service = error_catcher::validate_service_name(&args).map_err(|e| e.join("\n"))?;
-    error_catcher::validate_service_exists(service).map_err(|e| e.join("\n"))?;
+/// Returns raw `systemctl status` output lines for the given service.
+pub fn status_service(service: &str) -> Result<Vec<String>, String> {
+    systemctl_queries::validate_service_exists(service).map_err(|e| e.join("\n"))?;
 
     let output = Command::new("systemctl")
         .args(["status", service])
@@ -20,97 +19,80 @@ pub fn status_service(args: Option<Vec<String>>) -> Result<Vec<String>, String> 
         .collect())
 }
 
-/// Currently, Just these Actions which returns services errors
+pub fn reload_service(service: &str) -> Result<Vec<String>, String> {
+    systemctl_queries::validate_service_exists(service).map_err(|e| e.join("\n"))?;
 
-pub fn reload_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
-    // Check if exists BEFORE attempting Action
-    let service = error_catcher::validate_service_name(&args)?;
-    error_catcher::validate_service_exists(service)?;
-
-    Command::new("sudo")
+    let _ = Command::new("sudo")
         .args(["systemctl", "reload-or-restart", service])
-        .status()
-        .expect("Failed to run systemctl command");
-
-    error_catcher::start_validation(args.as_ref().unwrap())
+        .stdout(Stdio::null()) // discard stdout
+        .stderr(Stdio::null()) // discard stderr
+        .status(); // ignore result; errors handled by your own validation
+    systemctl_queries::start_validation(service).map_err(|e| e.join("\n"))
 }
 
-pub fn disable_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
-    // Check if exists BEFORE attempting Action
-    let service = error_catcher::validate_service_name(&args)?;
-    error_catcher::validate_service_exists(service)?;
+pub fn disable_service(service: &str) -> Result<Vec<String>, Vec<String>> {
+    systemctl_queries::validate_service_exists(service)?;
 
     let output = Command::new("sudo")
         .args(["systemctl", "disable", service])
         .output()
-        .expect("Failed to run systemctl command");
+        .map_err(|e| vec![e.to_string()])?;
 
     if output.status.success() {
-        error_catcher::enable_disable_validation(service, false)
+        systemctl_queries::enable_disable_validation(service, false)
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         Err(vec![stderr])
     }
 }
 
-pub fn enable_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
-    // Check if exists BEFORE attempting Action
-    let service = error_catcher::validate_service_name(&args)?;
-    error_catcher::validate_service_exists(service)?;
+pub fn enable_service(service: &str) -> Result<Vec<String>, Vec<String>> {
+    systemctl_queries::validate_service_exists(service)?;
 
     let output = Command::new("sudo")
         .args(["systemctl", "enable", service])
         .output()
-        .expect("Failed to run systemctl command");
+        .map_err(|e| vec![e.to_string()])?;
 
     if output.status.success() {
-        error_catcher::enable_disable_validation(service, true)
+        systemctl_queries::enable_disable_validation(service, true)
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         Err(vec![stderr])
     }
 }
 
-pub fn mask_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
-    // Check if exists BEFORE attempting mask...
-    // Doing this now prevents unnecessary actions such as masking a non-existent service anyways
-    let service = error_catcher::validate_service_name(&args)?;
-    error_catcher::validate_service_exists(service)?;
+pub fn mask_service(service: &str) -> Result<Vec<String>, Vec<String>> {
+    systemctl_queries::validate_service_exists(service)?;
 
     let output = Command::new("sudo")
         .args(["systemctl", "mask", service])
         .output()
-        .expect("Failed to run systemctl command");
+        .map_err(|e| vec![e.to_string()])?;
 
-    // Get stderr messages (systemd's weird default is stderr!?)
+    // systemd writes informational messages to stderr even on success.
     let stderr_lines: Vec<String> = String::from_utf8_lossy(&output.stderr)
         .trim()
         .lines()
         .map(|s| s.to_string())
         .collect();
 
-    // Check exit code to determine success/failure
     if output.status.success() {
-        // Success - stderr contains info messages
-        let mut result = error_catcher::mask_validation(service, true)?;
+        let mut result = systemctl_queries::mask_validation(service, true)?;
         result.extend(stderr_lines);
         Ok(result)
     } else {
-        // Failure - stderr contains error messages
-        error_catcher::mask_validation(service, true)
+        systemctl_queries::mask_validation(service, true)
     }
 }
 
-pub fn unmask_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
-    // Check if exists BEFORE attempting unmask...
-    // Doing this now prevents unnecessary actions such as unmasking a non-existent service anyways
-    let service = error_catcher::validate_service_name(&args)?;
-    error_catcher::validate_service_exists(service)?;
+pub fn unmask_service(service: &str) -> Result<Vec<String>, Vec<String>> {
+    systemctl_queries::validate_service_exists(service)?;
 
     let output = Command::new("sudo")
         .args(["systemctl", "unmask", service])
         .output()
-        .expect("Failed to run systemctl command");
+        .map_err(|e| vec![e.to_string()])?;
 
     let stderr_lines: Vec<String> = String::from_utf8_lossy(&output.stderr)
         .trim()
@@ -119,41 +101,38 @@ pub fn unmask_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<Str
         .collect();
 
     if output.status.success() {
-        let mut result = error_catcher::mask_validation(service, false)?;
+        let mut result = systemctl_queries::mask_validation(service, false)?;
         result.extend(stderr_lines);
         Ok(result)
     } else {
-        error_catcher::mask_validation(service, false)
+        systemctl_queries::mask_validation(service, false)
     }
 }
 
-pub fn start_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
-    // Check if exists BEFORE attempting Action
-    let service = error_catcher::validate_service_name(&args)?;
-    error_catcher::validate_service_exists(service)?;
+pub fn start_service(service: &str) -> Result<Vec<String>, Vec<String>> {
+    systemctl_queries::validate_service_exists(service)?;
 
     Command::new("sudo")
         .args(["systemctl", "start", service])
         .output()
-        .expect("Failed to run systemctl command");
+        .map_err(|e| vec![e.to_string()])?;
 
-    error_catcher::start_validation(args.as_ref().unwrap())
+    systemctl_queries::start_validation(service)
 }
 
-pub fn stop_service(args: &Option<Vec<String>>) -> Result<Vec<String>, Vec<String>> {
-    // Check if exists BEFORE attempting Action
-    let service = error_catcher::validate_service_name(&args)?;
-    error_catcher::validate_service_exists(service)?;
+pub fn stop_service(service: &str) -> Result<Vec<String>, Vec<String>> {
+    systemctl_queries::validate_service_exists(service)?;
 
     Command::new("sudo")
         .args(["systemctl", "stop", service])
         .output()
-        .expect("Failed to run systemctl command");
+        .map_err(|e| vec![e.to_string()])?;
 
-    error_catcher::stop_validation(args.as_ref().unwrap())
+    systemctl_queries::stop_validation(service)
 }
 
-/// No Argument Actions
+// ── No-Argument Actions ───────────────────────────────────────────────────────
+
 pub struct ServiceEntry {
     pub name: String,
     pub load_state: String,
@@ -168,9 +147,7 @@ pub fn list_services() -> Result<Vec<ServiceEntry>, String> {
         .output()
         .map_err(|e| e.to_string())?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    let entries = stdout
+    let entries = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| {
             let mut parts = line.split_whitespace();
@@ -194,8 +171,9 @@ pub fn help_service() -> Vec<String> {
         "".to_string(),
         "Imperative actions:".to_string(),
         "  list              List all services".to_string(),
-        "  reset             Reset the failed services".to_string(),
+        "  reset             Reset failed services".to_string(),
         "  status  <name>    Show service status".to_string(),
+        "  reload  <name>    Reload or restart a service".to_string(),
         "".to_string(),
         "Declarative (config/change):".to_string(),
         "  service config <name> running=true enabled=yes masked=0".to_string(),
@@ -203,30 +181,29 @@ pub fn help_service() -> Vec<String> {
 }
 
 pub fn reset_service() -> Result<Vec<String>, String> {
-    // Get list of failed services BEFORE reset
-    let failed_services = Command::new("systemctl")
+    let failed_output = Command::new("systemctl")
         .args(["list-units", "--failed", "--no-legend", "--plain"])
         .output()
         .expect("Failed to get failed services");
 
-    let failed_services: Vec<String> = String::from_utf8_lossy(&failed_services.stdout)
+    let failed_services: Vec<String> = String::from_utf8_lossy(&failed_output.stdout)
         .lines()
-        .filter_map(|line| {
-            // Extract service name (first column)
-            line.split_whitespace().next().map(|s| s.to_string())
-        })
+        .filter_map(|line| line.split_whitespace().next().map(|s| s.to_string()))
         .collect();
 
-    // Run reset command
     Command::new("sudo")
         .args(["systemctl", "reset-failed"])
         .status()
-        .expect("Failed to run systemctl command");
+        .map_err(|e| e.to_string())?;
 
-    // Return list of reset services
     if failed_services.is_empty() {
         Ok(vec!["No failed services to reset".to_string()])
     } else {
-        Ok(failed_services)
+        let mut output = Vec::new();
+
+        output.push("Reset the following failed services:".to_string());
+        output.extend(failed_services);
+
+        Ok(output)
     }
 }

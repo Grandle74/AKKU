@@ -1,9 +1,9 @@
 // shared/src/lib.rs
+// Shared types used by both the Engine (planner & executor) and all Modules (state helpers).
+// Modules cannot reach Engine types directly, so this crate is the common ground.
 
-// This Library is used by the "Engine Planner & Executor" and also used by the "Modules State Helpers"
-// Since the Modules can't reach and use the Order type directly, this is the shared representation.
-//---------------------This Comment isn't verified, yet idk what to say--------------------------------
-//----------------------------Engine + Upper layers Types----------------------------------
+// ── Engine + Upper-Layer Types ───────────────────────────────────────────────
+
 #[derive(serde::Deserialize, Debug, Clone)]
 pub enum Domain {
     Services,
@@ -12,22 +12,23 @@ pub enum Domain {
 
 #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum Action {
-    Meta(String),   // engine handles — keep as enum variant
-    Config,         // engine handles — keep as enum variant
-    Custom(String), // module handles — string is fine
+    Meta(String), // No target required — handled entirely by the engine (list, help, reset)
+    Config,       // Declarative desired-state — engine builds a Plan, waits for approval
+    Custom(String), // Imperative action — dispatched directly to the module (start, stop, ...)
 }
 
 impl From<&str> for Action {
     fn from(s: &str) -> Self {
         match s {
             "list" | "help" | "reset" => Action::Meta(s.to_string()),
-            "config" | "change" => Action::Config,
+            "config" | "change" | "cfg" => Action::Config,
             _ => Action::Custom(s.to_string()),
         }
     }
 }
 
-//----------------------------Engine + Modules Shared Types--------------------------------
+// ── Engine + Module Shared Types ─────────────────────────────────────────────
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PropertyValue {
     Bool(bool),
@@ -43,6 +44,7 @@ impl PropertyValue {
             None
         }
     }
+
     pub fn as_string(&self) -> Option<&str> {
         if let Self::String(v) = self {
             Some(v)
@@ -50,6 +52,7 @@ impl PropertyValue {
             None
         }
     }
+
     pub fn as_number(&self) -> Option<i64> {
         if let Self::Number(v) = self {
             Some(*v)
@@ -59,6 +62,8 @@ impl PropertyValue {
     }
 }
 
+/// The difference between current and desired state for a service.
+/// Produced by `state_helpers::calc()` and consumed by `state_helpers::to_steps()`.
 pub struct Delta {
     pub target: Option<String>,
     pub needs_start: bool,
