@@ -64,33 +64,24 @@ fn handle_intent(parts: &[String]) {
     match parts.len() {
         1 => println!("See '{} help' for more information.", domain),
 
-        // Bi-intent: domain + meta action only (list, help, reset)
-        2 => match process_bi_intent(domain, &parts[1]) {
-            Ok(output) => {
-                // should just work when resetting
-                // list and help do no show success mark
-                //print!("✔ ");
-                print_lines(output)
-            }
-            Err(errors) => {
-                print!("✗ Error: ");
-                print_lines(errors);
-            }
-        },
+        2 => {
+            let action = &parts[1];
+            let result = process_bi_intent(domain, action).map_err(|e| e); // already Vec<String>
+            print_result(action, result);
+        }
 
-        // Tri-intent: domain + action + target (status, start, stop, ...)
-        3 => match process_tri_intent(domain, parts[1].clone(), parts[2].clone(), HashMap::new()) {
-            Ok(result) => {
-                print_lines(result.output);
-                handle_pending_plan(result.pending_plan);
-            }
-            Err(errors) => {
-                print!("✗ Error: ");
-                print_lines(errors);
-            }
-        },
+        3 => {
+            let action = &parts[1];
+            let result =
+                process_tri_intent(domain, action.clone(), parts[2].clone(), HashMap::new()).map(
+                    |r| {
+                        handle_pending_plan(r.pending_plan);
+                        r.output
+                    },
+                );
+            print_result(action, result);
+        }
 
-        // Declarative: domain change <target> <key>=<value> ...
         _ => handle_declarative(domain, parts),
     }
 }
@@ -148,16 +139,12 @@ fn handle_declarative(domain: &str, parts: &[String]) {
         return;
     }
 
-    match process_tri_intent(domain, action, target, properties) {
-        Ok(result) => {
-            print_lines(result.output);
-            handle_pending_plan(result.pending_plan);
-        }
-        Err(errors) => {
-            print!("✗ Error: ");
-            print_lines(errors);
-        }
-    }
+    let result = process_tri_intent(domain, action.clone(), target, properties).map(|r| {
+        handle_pending_plan(r.pending_plan);
+        r.output
+    });
+
+    print_result(&action, result);
 }
 
 /// Handles the approval flow when a Config action produced a pending Plan.
@@ -188,5 +175,28 @@ fn handle_pending_plan(pending_plan: Option<api::Plan>) {
 fn print_lines<T: std::fmt::Display>(items: impl IntoIterator<Item = T>) {
     for item in items {
         println!("{}", item);
+    }
+}
+
+// Returns true for outputs that are purely informational — no success mark needed.
+// A future GUI would use this same classification to decide whether to show a status icon.
+fn is_informational(action: &str) -> bool {
+    matches!(action, "list" | "help" | "status")
+}
+
+// Unified result printer — the only place in the CLI that knows about ✔ and ✗.
+// All call sites hand their result here instead of handling marks themselves.
+fn print_result(action: &str, result: Result<Vec<String>, Vec<String>>) {
+    match result {
+        Ok(output) => {
+            if !is_informational(action) {
+                print!("✔ ");
+            }
+            print_lines(output);
+        }
+        Err(errors) => {
+            print!("✗ Error: ");
+            print_lines(errors);
+        }
     }
 }
