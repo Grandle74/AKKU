@@ -24,7 +24,7 @@ pub struct ServiceDesiredState {
 impl ServiceCurrentState {
     pub fn new(name: &str) -> Result<Self, String> {
         if !Self::query(name, &["cat", name]).status.success() {
-            return Err(format!("Service '{}' does not exist", name));
+            return Err(format!("Service '{}' doesn't exist", name));
         }
         let enabled_out = Self::query_stdout(name, &["is-enabled", name]);
         Ok(Self {

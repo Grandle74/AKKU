@@ -1,4 +1,4 @@
-use engine::{approve_plan as engine_approve, execute_order, Action, Domain, Order};
+use engine::{Action, Domain, Order, approve_plan as engine_approve, execute_order};
 pub use engine::{EngineResult, Plan, PropertyValue};
 use std::collections::HashMap;
 
@@ -32,10 +32,7 @@ pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<Strin
             )?;
             Ok(result.output) // pending_plan is always None here
         }
-        _ => Err(vec![format!(
-            "✗ Invalid command — see '{} help'",
-            domain_str
-        )]),
+        _ => Err(vec![format!("Invalid command — see '{} help'", domain_str)]),
     }
 }
 
@@ -53,10 +50,7 @@ pub fn process_tri_intent(
 
     match action {
         Action::Meta(_) => {
-            return Err(vec![format!(
-                "✗ Invalid command — see '{} help'",
-                domain_str
-            )]);
+            return Err(vec![format!("Invalid command — see '{} help'", domain_str)]);
         }
         Action::Config => {
             if properties.is_empty() {

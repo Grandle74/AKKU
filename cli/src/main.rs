@@ -51,11 +51,11 @@ fn show_help() {
     println!("      service start nginx");
     println!("      service status nginx");
     println!("\n  Declarative style (desired state):");
-    println!("    service <name> change <property>=<value> ...");
+    println!("    service change <name> <property>=<value> ...");
     println!("    Properties: running, enabled, masked");
     println!("    Examples:");
-    println!("      service nginx change running=true enabled=true");
-    println!("      service nginx change masked=false\n");
+    println!("      service change nginx running=true enabled=true");
+    println!("      service change nginx masked=false\n");
 }
 
 fn handle_intent(parts: &[String]) {
@@ -67,7 +67,10 @@ fn handle_intent(parts: &[String]) {
         // Bi-intent: unchanged, still returns Vec<String> directly
         2 => match process_bi_intent(domain, &parts[1]) {
             Ok(output) => print_lines(output),
-            Err(errors) => print_lines(errors),
+            Err(errors) => {
+                print!("✗ Error: ");
+                print_lines(errors)
+            }
         },
 
         // Tri-intent: now returns IntentResult — check for pending plan
@@ -78,7 +81,10 @@ fn handle_intent(parts: &[String]) {
                 // pending_plan is always None here — this branch is a no-op for now.
                 handle_pending_plan(result.pending_plan);
             }
-            Err(errors) => print_lines(errors),
+            Err(errors) => {
+                print!("✗ Error: ");
+                print_lines(errors)
+            }
         },
 
         // Declarative: domain <target> change <key>=<value> ...
@@ -159,7 +165,7 @@ fn handle_pending_plan(pending_plan: Option<api::Plan>) {
     let Some(plan) = pending_plan else { return };
 
     // Ask the user for approval
-    print!("\nApply this plan? [y/N] ");
+    print!("\nApply this plan? [y/N]: ");
     io::stdout().flush().unwrap();
 
     let mut input = String::new();
