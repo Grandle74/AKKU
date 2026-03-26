@@ -72,14 +72,15 @@ fn handle_intent(parts: &[String]) {
 
         3 => {
             let action = &parts[1];
-            let result =
-                process_tri_intent(domain, action.clone(), parts[2].clone(), HashMap::new()).map(
-                    |r| {
-                        handle_pending_plan(r.pending_plan);
-                        r.output
-                    },
-                );
-            print_result(action, result);
+            match process_tri_intent(domain, action.clone(), parts[2].clone(), HashMap::new()) {
+                Ok(r) if r.pending_plan.is_some() => {
+                    // Config action — plan display is informational, ✔ belongs to the approval result only.
+                    print_lines(r.output);
+                    handle_pending_plan(r.pending_plan);
+                }
+                Ok(r) => print_result(action, Ok(r.output)), // Imperative — mark logic applies normally.
+                Err(errors) => print_result(action, Err(errors)),
+            }
         }
 
         _ => handle_declarative(domain, parts),
@@ -139,12 +140,15 @@ fn handle_declarative(domain: &str, parts: &[String]) {
         return;
     }
 
-    let result = process_tri_intent(domain, action.clone(), target, properties).map(|r| {
-        handle_pending_plan(r.pending_plan);
-        r.output
-    });
-
-    print_result(&action, result);
+    match process_tri_intent(domain, action.clone(), target, properties) {
+        Ok(r) if r.pending_plan.is_some() => {
+            // Config action — plan display is informational, ✔ belongs to the approval result only.
+            print_lines(r.output);
+            handle_pending_plan(r.pending_plan);
+        }
+        Ok(r) => print_result(&action, Ok(r.output)),
+        Err(errors) => print_result(&action, Err(errors)),
+    }
 }
 
 /// Handles the approval flow when a Config action produced a pending Plan.
@@ -190,7 +194,10 @@ fn print_result(action: &str, result: Result<Vec<String>, Vec<String>>) {
     match result {
         Ok(output) => {
             if !is_informational(action) {
-                print!("✔ ");
+                // FIX: Only print if the first line doesn't already start with a checkmark
+                if !output.first().map_or(false, |s| s.starts_with('✔')) {
+                    print!("✔ ");
+                }
             }
             print_lines(output);
         }
