@@ -12,6 +12,12 @@ pub use engine::EngineResult as IntentResult;
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
+pub enum RunMode {
+    Normal, // generate plan → save → prompt user
+    DryRun, // generate plan → display → no save, no execute
+    Force,  // generate plan → save → auto-execute (no prompt)
+}
+
 /// Bi-intent: domain + action, no target (list, help, reset, ...).
 /// Always executes immediately — no planning, no approval.
 pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<String>, Vec<String>> {
@@ -35,14 +41,17 @@ pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<Strin
     }
 }
 
-/// Tri-intent: domain + action + target + optional properties (status, start, config, ...).
-/// Config actions return a pending Plan — the caller must handle approval.
-/// All other actions return final output with no pending plan.
+/// Tri-intent: domain + action + target + optional properties.
+/// Handles all RunMode branching here — the frontend never needs to branch on mode.
+/// - DryRun:  plan generated and shown, never saved, no pending returned
+/// - Force:   plan generated, saved, and auto-approved — final output returned
+/// - Normal:  plan saved and surfaced as pending — frontend prompts the user
 pub fn process_tri_intent(
     domain_str: &str,
     action_str: String,
     target: String,
     properties: HashMap<String, PropertyValue>,
+    mode: &RunMode,
 ) -> Result<IntentResult, Vec<String>> {
     let domain = parse_domain(domain_str).map_err(|e| vec![e])?;
     let action = Action::from(action_str.as_str());
@@ -58,21 +67,39 @@ pub fn process_tri_intent(
                     domain_str
                 )]);
             }
-            // Conflict validation happens at the API level — before touching the engine.
+            // Conflict validation at API boundary — before any engine work.
             validate_conflicts(domain.clone(), &properties).map_err(|e| vec![e])?;
         }
-        Action::Custom(_) => {} // No pre-validation needed; execute directly.
+        Action::Custom(_) => {}
     }
 
-    execute_order(
+    let mut result = execute_order(
         Order {
             domain,
             action,
             target: Some(target),
             desired_properties: properties,
         },
-        true, // Dry run
-    )
+        true,
+    )?;
+
+    // RunMode branching lives here, not in the frontend.
+    match mode {
+        RunMode::DryRun => {
+            // Plan is shown via output but never saved — no approval possible.
+            result.pending_plan = None;
+        }
+        RunMode::Force => {
+            // Auto-approve: bypass the frontend prompt entirely.
+            if let Some(plan) = result.pending_plan.take() {
+                let approved_output = engine_approve(plan, true)?;
+                result.output.extend(approved_output);
+            }
+        }
+        RunMode::Normal => {} // Pending plan surfaces to the frontend as-is.
+    }
+
+    Ok(result)
 }
 
 /// Trip 2 — Forward the user's approval decision to the engine.

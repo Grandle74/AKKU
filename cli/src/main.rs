@@ -1,5 +1,6 @@
 // cli/src/main.rs
-use api::{PropertyValue, approve_intent, process_bi_intent, process_tri_intent};
+use api::{PropertyValue, RunMode, approve_intent, process_bi_intent, process_tri_intent};
+use rustyline::error::ReadlineError;
 use std::collections::HashMap;
 use std::io::{self, Write};
 
@@ -11,31 +12,78 @@ fn main() {
     );
     println!("Enter \"help\" for commands list\n");
 
+    let mut rl = rustyline::DefaultEditor::new().expect("Failed to initialize input editor");
+
     'repl: loop {
-        print!("commando(v0.1)~> ");
-        io::stdout().flush().unwrap();
+        match rl.readline("commando(v0.1)~> ") {
+            Ok(line) => {
+                let trimmed = line.trim().to_string();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let _ = rl.add_history_entry(&trimmed);
 
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+                let (parts, mode) = parse_flags(&trimmed);
+                if parts.is_empty() {
+                    continue;
+                }
 
-        let parts: Vec<String> = input.trim().split_whitespace().map(String::from).collect();
-        if parts.is_empty() {
-            continue;
-        }
-
-        match parts[0].as_str() {
-            "help" => show_help(),
-            "exit" | "quit" => {
+                match parts[0].as_str() {
+                    "help" => show_help(),
+                    "exit" | "quit" => {
+                        println!("Exiting...");
+                        break 'repl;
+                    }
+                    "clear" | "cls" => {
+                        print!("\x1B[2J\x1B[1;1H");
+                        io::stdout().flush().unwrap();
+                    }
+                    _ => handle_intent(&parts, mode),
+                }
+            }
+            Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                 println!("Exiting...");
                 break 'repl;
             }
-            "clear" | "cls" => {
-                print!("\x1B[2J\x1B[1;1H");
-                io::stdout().flush().unwrap();
+            Err(e) => {
+                eprintln!("Input error: {e}");
+                break 'repl;
             }
-            _ => handle_intent(&parts),
         }
     }
+}
+
+/// Strips `--dry-run` and `--force` flags from the token list.
+/// Returns the clean parts and the resolved RunMode.
+/// `--force` takes precedence: if both are present, Force wins.
+fn parse_flags(input: &str) -> (Vec<String>, RunMode) {
+    let mut dry_run = false;
+    let mut force = false;
+    let parts: Vec<String> = input
+        .split_whitespace()
+        .filter(|t| {
+            if *t == "--dry-run" {
+                dry_run = true;
+                false
+            } else if *t == "--force" {
+                force = true;
+                false
+            } else {
+                true
+            }
+        })
+        .map(String::from)
+        .collect();
+
+    let mode = if force {
+        RunMode::Force
+    } else if dry_run {
+        RunMode::DryRun
+    } else {
+        RunMode::Normal
+    };
+
+    (parts, mode)
 }
 
 fn show_help() {
@@ -57,7 +105,7 @@ fn show_help() {
     println!("      service change nginx masked=false\n");
 }
 
-fn handle_intent(parts: &[String]) {
+fn handle_intent(parts: &[String], mode: RunMode) {
     let domain = &parts[0];
 
     match parts.len() {
@@ -65,28 +113,33 @@ fn handle_intent(parts: &[String]) {
 
         2 => {
             let action = &parts[1];
-            let result = process_bi_intent(domain, action).map_err(|e| e); // already Vec<String>
+            let result = process_bi_intent(domain, action);
             print_result(action, result);
         }
 
         3 => {
             let action = &parts[1];
-            match process_tri_intent(domain, action.clone(), parts[2].clone(), HashMap::new()) {
+            match process_tri_intent(
+                domain,
+                action.clone(),
+                parts[2].clone(),
+                HashMap::new(),
+                &mode,
+            ) {
                 Ok(r) if r.pending_plan.is_some() => {
-                    // Config action — plan display is informational, ✔ belongs to the approval result only.
                     print_lines(r.output);
                     handle_pending_plan(r.pending_plan);
                 }
-                Ok(r) => print_result(action, Ok(r.output)), // Imperative — mark logic applies normally.
+                Ok(r) => print_result(action, Ok(r.output)),
                 Err(errors) => print_result(action, Err(errors)),
             }
         }
 
-        _ => handle_declarative(domain, parts),
+        _ => handle_declarative(domain, parts, mode),
     }
 }
 
-fn handle_declarative(domain: &str, parts: &[String]) {
+fn handle_declarative(domain: &str, parts: &[String], mode: RunMode) {
     let action = parts[1].to_string();
     let target = parts[2].to_string();
     let mut properties = HashMap::new();
@@ -139,9 +192,8 @@ fn handle_declarative(domain: &str, parts: &[String]) {
         return;
     }
 
-    match process_tri_intent(domain, action.clone(), target, properties) {
+    match process_tri_intent(domain, action.clone(), target, properties, &mode) {
         Ok(r) if r.pending_plan.is_some() => {
-            // Config action — plan display is informational, ✔ belongs to the approval result only.
             print_lines(r.output);
             handle_pending_plan(r.pending_plan);
         }
@@ -150,8 +202,8 @@ fn handle_declarative(domain: &str, parts: &[String]) {
     }
 }
 
-/// Handles the approval flow when a Config action produced a pending Plan.
-/// Asks the user yes/no, then forwards their decision to `approve_intent()`.
+// Approval prompt — only reached in Normal mode.
+// DryRun and Force are fully resolved by the API before returning.
 fn handle_pending_plan(pending_plan: Option<api::Plan>) {
     let Some(plan) = pending_plan else { return };
 
@@ -166,7 +218,7 @@ fn handle_pending_plan(pending_plan: Option<api::Plan>) {
     match approve_intent(plan, approved) {
         Ok(output) => {
             print!("✔ ");
-            print_lines(output)
+            print_lines(output);
         }
         Err(errors) => {
             print!("✗ Error: ");
