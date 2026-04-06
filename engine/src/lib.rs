@@ -105,12 +105,3 @@ pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<Strin
 
     result
 }
-
-/// Standalone plan inspection — used for dry-run or debugging without the approval flow.
-pub fn plan(order: Order) -> Result<Plan, Vec<String>> {
-    planner::create_plan(
-        &module_resolver::resolve(&order.domain).map_err(|e| vec![e])?,
-        &order,
-    )
-    .map_err(|e| vec![e])
-}

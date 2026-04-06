@@ -110,7 +110,6 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Plan, String> {
         steps,
     };
 
-    plan.save()?; // Persist immediately — audit trail starts at creation.
     Ok(plan)
 }
 

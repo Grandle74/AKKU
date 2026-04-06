@@ -112,15 +112,24 @@ fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome
         .ok_or_else(|| vec!["Engine failed to generate plan".into()])?;
 
     match mode {
-        RunMode::DryRun => Ok(IntentOutcome::DryRun { plan_text }),
+        RunMode::DryRun => {
+            // DryRun: never persist
+            Ok(IntentOutcome::DryRun { plan_text })
+        }
         RunMode::Force => {
+            // Force: save, then auto-approve
+            plan.save().map_err(|e| vec![e])?;
             let result_text = approve_intent(plan, true)?;
             Ok(IntentOutcome::AutoApplied {
                 plan_text,
                 result_text,
             })
         }
-        RunMode::Normal => Ok(IntentOutcome::RequiresApproval { plan, plan_text }),
+        RunMode::Normal => {
+            // Normal: save, then surface for approval
+            plan.save().map_err(|e| vec![e])?;
+            Ok(IntentOutcome::RequiresApproval { plan, plan_text })
+        }
     }
 }
 
