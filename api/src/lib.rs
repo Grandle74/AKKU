@@ -1,25 +1,32 @@
-// api/src/lib.rs
 use engine::{Action, Domain, Order, approve_plan as engine_approve, execute_order};
 pub use engine::{Plan, PropertyValue};
 use std::collections::HashMap;
 
 mod service_validator;
 
-// IntentResult is the API-level alias for EngineResult.
-// When `pending_plan` is Some, the frontend must ask for approval and call `approve_intent()`.
-// When None, `output` is final — no further action needed.
 pub use engine::EngineResult as IntentResult;
 
-// ── Public API ───────────────────────────────────────────────────────────────
-
-pub enum RunMode {
-    Normal, // generate plan → save → prompt user
-    DryRun, // generate plan → display → no save, no execute
-    Force,  // generate plan → save → auto-execute (no prompt)
+pub enum IntentOutcome {
+    Immediate(Vec<String>),
+    DryRun {
+        plan_text: Vec<String>,
+    },
+    RequiresApproval {
+        plan: Plan,
+        plan_text: Vec<String>,
+    },
+    AutoApplied {
+        plan_text: Vec<String>,
+        result_text: Vec<String>,
+    },
 }
 
-/// Bi-intent: domain + action, no target (list, help, reset, ...).
-/// Always executes immediately — no planning, no approval.
+pub enum RunMode {
+    Normal,
+    DryRun,
+    Force,
+}
+
 pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<String>, Vec<String>> {
     let domain = parse_domain(domain_str).map_err(|e| vec![e])?;
     let action = Action::from(action_str);
@@ -41,74 +48,90 @@ pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<Strin
     }
 }
 
-/// Tri-intent: domain + action + target + optional properties.
-/// Handles all RunMode branching here — the frontend never needs to branch on mode.
-/// - DryRun:  plan generated and shown, never saved, no pending returned
-/// - Force:   plan generated, saved, and auto-approved — final output returned
-/// - Normal:  plan saved and surfaced as pending — frontend prompts the user
 pub fn process_tri_intent(
     domain_str: &str,
     action_str: String,
     target: String,
     properties: HashMap<String, PropertyValue>,
     mode: &RunMode,
-) -> Result<IntentResult, Vec<String>> {
-    let domain = parse_domain(domain_str).map_err(|e| vec![e])?;
+) -> Result<IntentOutcome, Vec<String>> {
     let action = Action::from(action_str.as_str());
+    let domain = validate_request(domain_str, &action, &properties)?;
 
-    match action {
-        Action::Meta(_) => {
-            return Err(vec![format!("Invalid command — see '{} help'", domain_str)]);
-        }
-        Action::Config => {
-            if properties.is_empty() {
-                return Err(vec![format!(
-                    "✗ No properties provided — see '{} help'",
-                    domain_str
-                )]);
-            }
-            // Conflict validation at API boundary — before any engine work.
-            validate_conflicts(domain.clone(), &properties).map_err(|e| vec![e])?;
-        }
-        Action::Custom(_) => {}
-    }
-
-    let mut result = execute_order(
+    let result = execute_order(
         Order {
             domain,
-            action,
+            action: action.clone(), // Clone so we can check it later
             target: Some(target),
             desired_properties: properties,
         },
         true,
     )?;
 
-    // RunMode branching lives here, not in the frontend.
-    match mode {
-        RunMode::DryRun => {
-            // Plan is shown via output but never saved — no approval possible.
-            result.pending_plan = None;
-        }
-        RunMode::Force => {
-            // Auto-approve: bypass the frontend prompt entirely.
-            if let Some(plan) = result.pending_plan.take() {
-                let approved_output = engine_approve(plan, true)?;
-                result.output.extend(approved_output);
-            }
-        }
-        RunMode::Normal => {} // Pending plan surfaces to the frontend as-is.
+    // FIX: If it wasn't a Config action, it's an Immediate result.
+    // The Engine correctly returned pending_plan: None for these.
+    if !matches!(action, Action::Config) {
+        return Ok(IntentOutcome::Immediate(result.output));
     }
 
-    Ok(result)
+    // Only Config actions go to the resolver to handle DryRun/Force/Normal
+    resolve_outcome(result, mode)
 }
 
-/// Trip 2 — Forward the user's approval decision to the engine.
-/// Call this only when `process_tri_intent` returned a `pending_plan`.
 pub fn approve_intent(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<String>> {
     engine_approve(plan, approved)
 }
 
-// ── Conflict Validation ───────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+fn validate_request(
+    domain_str: &str,
+    action: &Action,
+    properties: &HashMap<String, PropertyValue>,
+) -> Result<Domain, Vec<String>> {
+    let domain = parse_domain(domain_str).map_err(|e| vec![e])?;
+
+    match action {
+        Action::Meta(_) => Err(vec![format!("Invalid command — see '{} help'", domain_str)]),
+        Action::Config if properties.is_empty() => Err(vec![format!(
+            "No properties provided — see '{} help'",
+            domain_str
+        )]),
+        Action::Config => {
+            validate_conflicts(domain.clone(), properties).map_err(|e| vec![e])?;
+            Ok(domain)
+        }
+        _ => Ok(domain),
+    }
+}
+
+fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome, Vec<String>> {
+    let plan_text = result.output;
+    let plan = result
+        .pending_plan
+        .ok_or_else(|| vec!["Engine failed to generate plan".into()])?;
+
+    match mode {
+        RunMode::DryRun => {
+            // DryRun: never persist
+            Ok(IntentOutcome::DryRun { plan_text })
+        }
+        RunMode::Force => {
+            // Force: save, then auto-approve
+            plan.save().map_err(|e| vec![e])?;
+            let result_text = approve_intent(plan, true)?;
+            Ok(IntentOutcome::AutoApplied {
+                plan_text,
+                result_text,
+            })
+        }
+        RunMode::Normal => {
+            // Normal: save, then surface for approval
+            plan.save().map_err(|e| vec![e])?;
+            Ok(IntentOutcome::RequiresApproval { plan, plan_text })
+        }
+    }
+}
 
 fn validate_conflicts(
     domain: Domain,
@@ -116,11 +139,8 @@ fn validate_conflicts(
 ) -> Result<(), String> {
     match domain {
         Domain::Services => service_validator::validate(properties),
-        // Future: Domain::Network => network_validator::validate(properties),
     }
 }
-
-// ── Parsers ───────────────────────────────────────────────────────────────────
 
 fn parse_domain(s: &str) -> Result<Domain, String> {
     match s {
