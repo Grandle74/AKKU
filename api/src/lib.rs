@@ -19,6 +19,10 @@ pub enum IntentOutcome {
         plan_text: Vec<String>,
         result_text: Vec<String>,
     },
+    ApplyFailed {
+        plan_text: Vec<String>,
+        errors: Vec<String>,
+    },
 }
 
 pub enum RunMode {
@@ -107,26 +111,25 @@ fn validate_request(
 
 fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome, Vec<String>> {
     let plan_text = result.output;
-    let plan = result
-        .pending_plan
-        .ok_or_else(|| vec!["Engine failed to generate plan".into()])?;
+
+    // No steps = already at desired state. Engine returned None intentionally.
+    let Some(plan) = result.pending_plan else {
+        return Ok(IntentOutcome::Immediate(plan_text));
+    };
 
     match mode {
-        RunMode::DryRun => {
-            // DryRun: never persist
-            Ok(IntentOutcome::DryRun { plan_text })
-        }
+        RunMode::DryRun => Ok(IntentOutcome::DryRun { plan_text }),
         RunMode::Force => {
-            // Force: save, then auto-approve
             plan.save().map_err(|e| vec![e])?;
-            let result_text = approve_intent(plan, true)?;
-            Ok(IntentOutcome::AutoApplied {
-                plan_text,
-                result_text,
-            })
+            match approve_intent(plan, true) {
+                Ok(result_text) => Ok(IntentOutcome::AutoApplied {
+                    plan_text,
+                    result_text,
+                }),
+                Err(errors) => Ok(IntentOutcome::ApplyFailed { plan_text, errors }),
+            }
         }
         RunMode::Normal => {
-            // Normal: save, then surface for approval
             plan.save().map_err(|e| vec![e])?;
             Ok(IntentOutcome::RequiresApproval { plan, plan_text })
         }

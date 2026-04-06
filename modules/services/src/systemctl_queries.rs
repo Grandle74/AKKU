@@ -11,6 +11,8 @@ pub struct ServiceProperties {
     pub result: String,
     pub exec_main_status: Option<i32>,
     pub main_pid: Option<u32>,
+    pub active_enter_timestamp: u64,
+    pub inactive_enter_timestamp: u64,
 }
 
 impl ServiceProperties {
@@ -22,6 +24,8 @@ impl ServiceProperties {
             result: String::new(),
             main_pid: None,
             exec_main_status: None,
+            active_enter_timestamp: 0,
+            inactive_enter_timestamp: 0,
         };
         props.query_and_parse(service);
         props
@@ -38,7 +42,7 @@ impl ServiceProperties {
                 .args([
                     "show",
                     &service,
-                    "--property=LoadState,ExecMainStatus,Result,ActiveState,MainPID,SubState",
+                    "--property=LoadState,ExecMainStatus,Result,ActiveState,MainPID,SubState,ActiveEnterTimestampMonotonic,InactiveEnterTimestampMonotonic",
                 ])
                 .output()
                 .expect("Failed to query systemctl properties");
@@ -64,7 +68,13 @@ impl ServiceProperties {
                     "SubState" => self.sub_state = value.to_string(),
                     "MainPID" => self.main_pid = value.parse().ok(),
                     "ExecMainStatus" => self.exec_main_status = value.parse().ok(),
-                    _ => panic!("Unexpected systemctl property: '{}'", key),
+                    "ActiveEnterTimestampMonotonic" => {
+                        self.active_enter_timestamp = value.parse().unwrap_or(0)
+                    }
+                    "InactiveEnterTimestampMonotonic" => {
+                        self.inactive_enter_timestamp = value.parse().unwrap_or(0)
+                    }
+                    _ => {}
                 }
             }
 
@@ -75,7 +85,49 @@ impl ServiceProperties {
             );
 
             if !still_transitioning {
-                return; // Got a settled state, no need to wait further.
+                // For active services: confirm the state holds briefly.
+                // Catches Type=simple services that start then immediately crash.
+                if self.active_state == "active" {
+                    std::thread::sleep(std::time::Duration::from_millis(800));
+                    // One re-query — overwrite self with confirmed final state.
+                    let recheck = Command::new("systemctl")
+                        .args([
+                            "show", &service,
+                            "--property=LoadState,ExecMainStatus,Result,ActiveState,MainPID,SubState,ActiveEnterTimestampMonotonic,InactiveEnterTimestampMonotonic",
+                        ])
+                        .output()
+                        .expect("Failed to re-query systemctl properties");
+
+                    for line in String::from_utf8_lossy(&recheck.stdout).lines() {
+                        let mut parts = line.splitn(2, '=');
+                        if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
+                            match key {
+                                "LoadState" => self.load_state = value.to_string(),
+                                "ActiveState" => self.active_state = value.to_string(),
+                                "Result" => self.result = value.to_string(),
+                                "SubState" => self.sub_state = value.to_string(),
+                                "MainPID" => self.main_pid = value.parse().ok(),
+                                "ExecMainStatus" => self.exec_main_status = value.parse().ok(),
+                                "ActiveEnterTimestampMonotonic" => {
+                                    self.active_enter_timestamp = value.parse().unwrap_or(0)
+                                }
+                                "InactiveEnterTimestampMonotonic" => {
+                                    self.inactive_enter_timestamp = value.parse().unwrap_or(0)
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    // Now the timestamp check is meaningful — crash has had time to register.
+                    if self.inactive_enter_timestamp > self.active_enter_timestamp
+                        && self.inactive_enter_timestamp != 0
+                    {
+                        self.active_state = "failed".to_string();
+                        self.sub_state = "dead".to_string();
+                    }
+                }
+                return;
             }
 
             // Still transitioning — wait and retry, unless this was the last attempt.
