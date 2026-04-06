@@ -101,9 +101,7 @@ fn validate_request(
             validate_conflicts(domain.clone(), properties).map_err(|e| vec![e])?;
             Ok(domain)
         }
-        _ => {
-            unreachable!()
-        }
+        _ => Ok(domain),
     }
 }
 
