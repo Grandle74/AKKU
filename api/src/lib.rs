@@ -19,6 +19,10 @@ pub enum IntentOutcome {
         plan_text: Vec<String>,
         result_text: Vec<String>,
     },
+    ApplyFailed {
+        plan_text: Vec<String>,
+        errors: Vec<String>,
+    },
 }
 
 pub enum RunMode {
@@ -117,11 +121,13 @@ fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome
         RunMode::DryRun => Ok(IntentOutcome::DryRun { plan_text }),
         RunMode::Force => {
             plan.save().map_err(|e| vec![e])?;
-            let result_text = approve_intent(plan, true)?;
-            Ok(IntentOutcome::AutoApplied {
-                plan_text,
-                result_text,
-            })
+            match approve_intent(plan, true) {
+                Ok(result_text) => Ok(IntentOutcome::AutoApplied {
+                    plan_text,
+                    result_text,
+                }),
+                Err(errors) => Ok(IntentOutcome::ApplyFailed { plan_text, errors }),
+            }
         }
         RunMode::Normal => {
             plan.save().map_err(|e| vec![e])?;

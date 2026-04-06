@@ -146,6 +146,11 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
             println!("\n⚡ --force: auto-approving plan.");
             print_result(action, Ok(result_text));
         }
+        IntentOutcome::ApplyFailed { plan_text, errors } => {
+            print_lines(plan_text);
+            println!("\n⚡ --force: auto-approving plan.");
+            print_result(action, Err(errors));
+        }
     }
 }
 
