@@ -48,7 +48,6 @@ fn show_help() {
     println!("    service <action> [name]");
     println!("    Examples:");
     println!("      service list");
-    println!("      service start nginx");
     println!("      service status nginx");
     println!("\n  Declarative style (desired state):");
     println!("    service change <name> <property>=<value> ...");

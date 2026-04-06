@@ -45,7 +45,7 @@ pub fn execute_order(order: Order, dry_run: bool) -> Result<EngineResult, Vec<St
             let output = vec![plan.output.clone()];
 
             // No steps = already at desired state. Nothing to approve, nothing was saved.
-            if plan.steps.is_empty() || !dry_run {
+            if plan.steps.is_empty() {
                 // Dry run: show plan, execute nothing.
                 return Ok(EngineResult {
                     output,
@@ -53,11 +53,18 @@ pub fn execute_order(order: Order, dry_run: bool) -> Result<EngineResult, Vec<St
                 });
             }
 
-            // Hand plan back to caller (API → frontend) for approval.
-            Ok(EngineResult {
-                output,
-                pending_plan: Some(plan),
-            })
+            if dry_run {
+                // Hand plan back to caller (API → frontend) for approval.
+                Ok(EngineResult {
+                    output,
+                    pending_plan: Some(plan),
+                })
+            } else {
+                Ok(EngineResult {
+                    output,
+                    pending_plan: None,
+                })
+            }
         }
 
         _ => {

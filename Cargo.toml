@@ -7,3 +7,9 @@ members = [
     "modules/services",
 ]
 default-members = ["cli"]
+
+[profile.release]
+opt-level = 'z'     # Optimize for size
+lto = true          # Enable Link Time Optimization
+codegen-units = 1   # Allow for better optimizations at the cost of compile time
+panic = 'abort'     # Remove stack unwinding (further reduces size)

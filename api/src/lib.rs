@@ -1,6 +1,6 @@
 // api/src/lib.rs
 use engine::{Action, Domain, Order, approve_plan as engine_approve, execute_order};
-pub use engine::{EngineResult, Plan, PropertyValue};
+pub use engine::{Plan, PropertyValue};
 use std::collections::HashMap;
 
 mod service_validator;
@@ -71,7 +71,7 @@ pub fn process_tri_intent(
             target: Some(target),
             desired_properties: properties,
         },
-        true,
+        true, // Dry run
     )
 }
 
@@ -98,6 +98,6 @@ fn validate_conflicts(
 fn parse_domain(s: &str) -> Result<Domain, String> {
     match s {
         "service" | "services" | "srv" => Ok(Domain::Services),
-        _ => Err(format!("Unknown module '{}' — available: service", s)),
+        _ => Err(format!("Unknown module '{}' — available: services", s)),
     }
 }
