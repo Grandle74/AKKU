@@ -19,28 +19,29 @@ use std::collections::HashMap;
 /// or execute anything. All side effects are handled by `plan_store` and
 /// `executor` in the engine layer.
 ///
-/// Both `Serialize` and `Deserialize` are derived so that the full plan
-/// (including Step data) can be written to and reconstructed from disk.
-/// This is required for the future rollback feature.
+/// `output` is skipped during serialization — it is display text assembled
+/// for the current session. Each frontend is responsible for rendering its
+/// own view of the plan steps. The file format uses `steps` as the source
+/// of truth.
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Plan {
     pub id: String,
     pub module_id: ModuleId,
     pub target: String,
-    /// Human-readable summary shown to the user before approval.
-    pub output: String,
-    /// The ordered operations to execute. Preserved in the plan file
-    /// (not just descriptions) to support future rollback.
+    #[serde(skip)]
+    pub output: Vec<String>,
     pub steps: Steps,
 }
 
-// ── ID Generation ────────────────────────────────────────────────────────────
+// ── ID Generation ─────────────────────────────────────────────────────────────
 
 /// Generates a human-readable, sortable, collision-resistant plan ID.
 ///
 /// Format:  `<domain_prefix>_<YYYYMMDD>_<HHMMSS>_<4hex>`
 /// Example: `svc_20260407_143022_a3f2`
 ///
+/// The timestamp embedded in the ID is the canonical creation time —
+/// no separate `created_at` field is needed in the plan file.
 /// The hex suffix is derived from sub-second nanoseconds, making
 /// same-second collisions practically impossible without a UUID library.
 fn generate_id(prefix: &str) -> String {
@@ -64,13 +65,12 @@ fn module_prefix(module: &ModuleId) -> &'static str {
     }
 }
 
-// ── Public Entry ─────────────────────────────────────────────────────────────
+// ── Public Entry ──────────────────────────────────────────────────────────────
 
 /// Builds a Plan for the given Order, or returns `None` if no changes are needed.
 ///
-/// Returning `None` (instead of a Plan with empty steps) eliminates the need
-/// for callers to inspect `plan.steps.is_empty()` and avoids the zombie Plan
-/// with `id: String::new()` that previously existed for the empty-steps case.
+/// `None` means the service is already at the desired state — the caller
+/// should surface this to the user without creating a plan file.
 pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, String> {
     let target = order.target.clone().ok_or("No target provided")?;
 
@@ -78,20 +78,15 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
         ModuleId::Services => plan_services(target.clone(), &order.desired_properties)?,
     };
 
-    // No diff = already at desired state. Signal this cleanly with None.
     if steps.is_empty() {
         return Ok(None);
     }
 
-    let output = format!(
-        "=== Plan for '{}' ===\n{}\n=====================",
-        target,
-        steps
-            .iter()
-            .map(|s| format!("  • {}", s.description))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
+    // Each step description becomes its own line so any frontend can
+    // render, join, or format the list however it sees fit.
+    let mut output = vec![format!("=== Plan for '{}' ===", target)];
+    output.extend(steps.iter().map(|s| format!("  • {}", s.description)));
+    output.push("=====================".to_string());
 
     Ok(Some(Plan {
         id: generate_id(module_prefix(module)),

@@ -17,11 +17,8 @@ use std::collections::HashMap;
 
 mod service_validator;
 
-pub use engine::EngineResult as IntentResult;
-
-// Re-exported so the CLI never imports shared_libs or engine directly.
-// The CLI's only dependency is this crate.
 pub use engine::Action;
+pub use engine::EngineResult as IntentResult;
 
 // ── Public Types ──────────────────────────────────────────────────────────────
 
@@ -98,8 +95,6 @@ pub fn process_tri_intent(
         return Ok(IntentOutcome::Immediate(result.output));
     }
 
-    // Config actions: the engine either found nothing to do (None) or
-    // returned a plan for us to handle according to the run mode.
     resolve_outcome(result, mode)
 }
 
@@ -153,7 +148,6 @@ fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome
         RunMode::DryRun => Ok(IntentOutcome::DryRun { plan_text }),
 
         RunMode::Force => {
-            // Save the plan file for audit record before executing.
             save_plan(&plan)?;
             match approve_intent(plan, true) {
                 Ok(result_text) => Ok(IntentOutcome::AutoApplied {
@@ -165,22 +159,21 @@ fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome
         }
 
         RunMode::Normal => {
-            // Save plan file before handing back to CLI — guarantees an audit record
-            // exists even if the user's answer is interrupted.
+            // Save before returning to the frontend — guarantees an audit record
+            // exists even if the process is killed during the approval window.
             save_plan(&plan)?;
             Ok(IntentOutcome::RequiresApproval { plan, plan_text })
         }
     }
 }
 
-/// Serializes and persists the plan via the engine's public surface.
+/// Persists the plan via the engine's public surface.
 ///
 /// The API never touches plan_store directly — that is a private engine
-/// implementation detail. This helper exists to avoid repeating the
-/// serialize + map_err pattern for both Force and Normal paths.
+/// implementation detail. Extracted as a helper to avoid repeating the
+/// map_err pattern for both Force and Normal paths.
 fn save_plan(plan: &Plan) -> Result<(), Vec<String>> {
-    let json = serde_json::to_string_pretty(plan).map_err(|e| vec![e.to_string()])?;
-    engine::save_plan(&json, &plan.id).map_err(|e| vec![e])
+    engine::save_plan(plan).map_err(|e| vec![e])
 }
 
 fn validate_conflicts(

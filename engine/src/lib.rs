@@ -4,7 +4,7 @@
 //
 // Trip 1 — `execute_order`: dispatches an Order.
 //   - Meta/Custom actions execute immediately and return output.
-//   - Config actions plan, and return the Plan for the API to handle.
+//   - Config actions plan and return the Plan for the API to handle.
 //     The engine has no opinion on dry-run vs force vs normal — that is
 //     the API layer's concern. The engine ALWAYS returns the plan.
 //
@@ -24,8 +24,8 @@ pub use planner::Plan;
 
 /// Public wrapper so the API layer can persist a plan without importing
 /// plan_store directly. plan_store stays a private engine implementation detail.
-pub fn save_plan(json: &str, id: &str) -> Result<(), String> {
-    plan_store::save(json, id)
+pub fn save_plan(plan: &Plan) -> Result<(), String> {
+    plan_store::save(plan)
 }
 
 // ── Core Types ────────────────────────────────────────────────────────────────
@@ -65,7 +65,6 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
 
     match &order.action {
         Action::Config => {
-            // create_plan returns None when the service is already at desired state.
             let maybe_plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
 
             match maybe_plan {
@@ -81,7 +80,9 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
                     })
                 }
                 Some(plan) => {
-                    let output = vec![plan.output.clone()];
+                    // Hand the plan's display lines to the frontend as-is.
+                    // The frontend decides how to render them.
+                    let output = plan.output.clone();
                     Ok(EngineResult {
                         output,
                         pending_plan: Some(plan),
@@ -107,7 +108,7 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
 ///
 /// Takes the in-memory Plan that was returned from `execute_order` —
 /// no file reload is needed for execution. The plan file (written by
-/// `plan_store::save` in the API layer before this is called) is only
+/// `engine::save_plan` in the API layer before this is called) is only
 /// updated here for audit-trail purposes.
 pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<String>> {
     if !approved {
