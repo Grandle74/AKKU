@@ -209,19 +209,11 @@ pub fn reset_service() -> Result<Vec<String>, String> {
     }
 }
 
+const HELP_TEXT: &str = include_str!("../doc/help.txt");
 pub fn help_service() -> Vec<String> {
-    vec![
-        "Usage: service <action> [target]".to_string(),
-        "       service cfg <target> <property>=<value> ...".to_string(),
-        "".to_string(),
-        "Imperative actions:".to_string(),
-        "  list              List all active services".to_string(),
-        "  reset             Reset all failed services".to_string(),
-        "  status  <name>    Show service status".to_string(),
-        "  reload  <name>    Reload or restart a service".to_string(),
-        "".to_string(),
-        "Declarative (desired state):".to_string(),
-        "  service cfg <name> running=true enabled=yes masked=0".to_string(),
-        "  Properties: running (bool), enabled (bool), masked (bool)".to_string(),
-    ]
+    let mut lines: Vec<String> = HELP_TEXT.lines().map(|s| s.to_string()).collect();
+
+    lines.insert(0, String::new());
+    lines.push(String::new());
+    lines
 }

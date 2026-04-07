@@ -28,7 +28,7 @@ fn main() {
     println!("Welcome to YaST3 (prototype)!");
     println!(
         "This is a prototype of YaST3, a system configuration tool.\n{}",
-        "─".repeat(56)
+        "─".repeat(62)
     );
     println!("Enter \"help\" for commands list\n");
 
@@ -299,32 +299,8 @@ fn parse_flags(input: &str) -> (Vec<String>, RunMode) {
 
 // ── Help ──────────────────────────────────────────────────────────────────────
 
+const CLI_HELP: &str = include_str!("../doc/help.txt");
+
 fn show_help() {
-    println!("\n=== commando — YaST3 Reference CLI ===");
-    println!("\nBuilt-in commands:");
-    println!("  help              Show this message");
-    println!("  clear             Clear the screen");
-    println!("  exit              Exit commando");
-    println!("\nFlags (appended to any command):");
-    println!("  --dry-run         Show the plan without saving or executing");
-    println!("  --force           Auto-approve the plan without prompting");
-    println!("\nImperative style (single action):");
-    println!("  service list");
-    println!("  service status  <name>");
-    println!("  service start   <name>");
-    println!("  service stop    <name>");
-    println!("  service enable  <name>");
-    println!("  service disable <name>");
-    println!("  service mask    <name>");
-    println!("  service unmask  <name>");
-    println!("  service reload  <name>");
-    println!("  service reset");
-    println!("\nDeclarative style (desired state):");
-    println!("  service cfg <name> <property>=<value> ...");
-    println!("  Properties: running (bool), enabled (bool), masked (bool)");
-    println!("  Examples:");
-    println!("    service cfg nginx running=true enabled=true");
-    println!("    service cfg nginx masked=false running=true");
-    println!("    service cfg nginx running=true --dry-run");
-    println!("    service cfg nginx running=true --force\n");
+    println!("\n{}", CLI_HELP);
 }
