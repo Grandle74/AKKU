@@ -1,0 +1,14 @@
+── Service Help ──────────────────────────────────────────────
+Usage: service <action> [target]
+       service cfg <target> <property>=<value> ...
+
+Imperative actions:
+  list              List all active services
+  reset             Reset all failed services
+  status  <name>    Show service status
+  reload  <name>    Reload or restart a service
+
+Declarative (desired state):
+  service cfg <name> running=true enabled=yes masked=0
+  Properties: running=(bool), enabled (bool), masked (bool)
+──────────────────────────────────────────────────────────────

@@ -1,0 +1,19 @@
+── Commando Help ──────────────────────────────────────────────
+Commando is an Official Reference CLI for YaST3 Development.
+
+Built-in commands:
+  help              Show this message
+  clear             Clear the screen
+  exit              Exit commando
+
+Flags (appended to configuration command "cfg"):
+  --dry-run         Show the plan without saving or executing
+  --force           Auto-approve the plan without prompting
+
+Usage Pattern:
+  <module> <action> [target] [properties...] [flags]
+
+Example:
+  service status apache2
+  service cfg nginx running=true --dry-run
+──────────────────────────────────────────────────────────────
