@@ -1,4 +1,16 @@
 // engine/src/lib.rs
+//
+// Engine entry points: the two trips of the Plan/approve flow.
+//
+// Trip 1 — `execute_order`: dispatches an Order.
+//   - Meta/Custom actions execute immediately and return output.
+//   - Config actions plan, and return the Plan for the API to handle.
+//     The engine has no opinion on dry-run vs force vs normal — that is
+//     the API layer's concern. The engine ALWAYS returns the plan.
+//
+// Trip 2 — `approve_plan`: acts on a user's yes/no decision.
+//   Executes or rejects the plan and updates the audit file.
+
 pub use shared_libs::{Action, Domain, PropertyValue};
 use std::collections::HashMap;
 
@@ -10,65 +22,76 @@ mod planner;
 pub use module_resolver::ModuleId;
 pub use planner::Plan;
 
-// ── Core Types ───────────────────────────────────────────────────────────────
+/// Public wrapper so the API layer can persist a plan without importing
+/// plan_store directly. plan_store stays a private engine implementation detail.
+pub fn save_plan(json: &str, id: &str) -> Result<(), String> {
+    plan_store::save(json, id)
+}
 
+// ── Core Types ────────────────────────────────────────────────────────────────
+
+/// Describes an operation to perform, as assembled by the API from parsed intent.
 #[derive(Debug, Clone)]
 pub struct Order {
     pub domain: Domain,
     pub action: Action,
+    /// Present for all actions except Meta. Required for Config (it is the plan target).
     pub target: Option<String>,
+    /// Non-empty only for Config actions. Ignored by Meta/Custom dispatchers.
     pub desired_properties: HashMap<String, PropertyValue>,
 }
 
 /// Returned by `execute_order` for every action.
-/// `pending_plan` is `Some` only for Config actions — the frontend must send it
-/// back via `approve_plan()` after the user confirms. All other actions return `None`.
+///
+/// `pending_plan` is `Some` only for Config actions with at least one step —
+/// the frontend must send it back via `approve_plan()` after the user confirms.
+/// `None` means either the action was not declarative, or the service is already
+/// at the desired state (no steps needed).
 pub struct EngineResult {
     pub output: Vec<String>,
     pub pending_plan: Option<Plan>,
 }
 
-// ── Engine Entry Points ──────────────────────────────────────────────────────
+// ── Trip 1 ────────────────────────────────────────────────────────────────────
 
-/// Trip 1 — Process an Order.
+/// Processes an Order and returns a result or a plan requiring approval.
 ///
-/// - Config actions: plans, saves to disk, returns a pending Plan for approval.
-/// - All other actions: execute immediately, no approval needed.
-pub fn execute_order(order: Order, dry_run: bool) -> Result<EngineResult, Vec<String>> {
+/// The engine does not know about run modes (dry-run, force, normal).
+/// That distinction is the API layer's responsibility. The engine always
+/// returns the Plan when one is created — what the API does with it is
+/// the API's concern.
+pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
     let module = module_resolver::resolve(&order.domain).map_err(|e| vec![e])?;
 
     match &order.action {
         Action::Config => {
-            // Query current state, diff against desired, build ordered steps.
-            // Persists to ~/.yast3/plans/<id>.plan.json for audit trail.
-            let plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
-            let output = vec![plan.output.clone()];
+            // create_plan returns None when the service is already at desired state.
+            let maybe_plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
 
-            // No steps = already at desired state. Nothing to approve, nothing was saved.
-            if plan.steps.is_empty() {
-                // Dry run: show plan, execute nothing.
-                return Ok(EngineResult {
-                    output,
-                    pending_plan: None,
-                });
-            }
-
-            if dry_run {
-                // Hand plan back to caller (API → frontend) for approval.
-                Ok(EngineResult {
-                    output,
-                    pending_plan: Some(plan),
-                })
-            } else {
-                Ok(EngineResult {
-                    output,
-                    pending_plan: None,
-                })
+            match maybe_plan {
+                None => {
+                    // Already at desired state — no plan, no approval needed.
+                    let msg = format!(
+                        "✔ '{}' is already in the desired state — no changes needed.",
+                        order.target.as_deref().unwrap_or("target")
+                    );
+                    Ok(EngineResult {
+                        output: vec![msg],
+                        pending_plan: None,
+                    })
+                }
+                Some(plan) => {
+                    let output = vec![plan.output.clone()];
+                    Ok(EngineResult {
+                        output,
+                        pending_plan: Some(plan),
+                    })
+                }
             }
         }
 
         _ => {
-            // Imperative actions (list, status, start, ...) — direct execution, no planning.
+            // Meta and Custom actions execute immediately — no planning, no approval.
             let output = executor::execute_normal(&order, &module).map_err(|e| vec![e])?;
             Ok(EngineResult {
                 output,
@@ -78,30 +101,38 @@ pub fn execute_order(order: Order, dry_run: bool) -> Result<EngineResult, Vec<St
     }
 }
 
-/// Trip 2 — Act on a pending Plan after the user's decision.
+// ── Trip 2 ───────────────────────────────────────────────────────────────────
+
+/// Acts on a user's approval or rejection of a pending Plan.
 ///
-/// Takes the in-memory Plan returned from `execute_order` — no file reload needed.
-/// Updates the plan file status at each stage for audit/rollback purposes.
+/// Takes the in-memory Plan that was returned from `execute_order` —
+/// no file reload is needed for execution. The plan file (written by
+/// `plan_store::save` in the API layer before this is called) is only
+/// updated here for audit-trail purposes.
 pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<String>> {
     if !approved {
-        // Persist rejection so the audit trail and rollback system can skip this plan.
-        plan_store::update_status(&plan.id, "rejected").map_err(|e| vec![e])?;
+        // Best-effort status update — a rejection is recorded for the audit trail
+        // but we don't surface a file-write error to the user for a rejection.
+        let _ = plan_store::update_status(&plan.id, "rejected");
         return Ok(vec!["Plan rejected.".to_string()]);
     }
 
-    // Mark as executing before step 1 — if the process crashes mid-flight, the file reflects it.
+    // Mark as executing BEFORE the first step. If the process crashes mid-flight,
+    // the file reflects "executing" rather than "pending", aiding diagnosis.
     plan_store::update_status(&plan.id, "executing").map_err(|e| vec![e])?;
 
     let result = executor::execute_plan(&plan);
 
-    // Always update the final status — clean audit trail regardless of outcome.
+    // Always record the final outcome — a clean audit trail is non-negotiable.
     match &result {
-        Ok(_) => plan_store::update_status(&plan.id, "completed").ok(),
-        Err(_) => {
-            plan_store::update_status(&plan.id, "failed").ok()
-            // TODO: Rollback hook — pass plan.id to rollback logic (not implemented yet).
+        Ok(_) => {
+            let _ = plan_store::update_status(&plan.id, "completed");
         }
-    };
+        Err(_) => {
+            let _ = plan_store::update_status(&plan.id, "failed");
+            // TODO: Rollback hook — pass plan.id to rollback logic.
+        }
+    }
 
     result
 }

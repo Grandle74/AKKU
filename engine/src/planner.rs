@@ -1,62 +1,58 @@
 // engine/src/planner.rs
+//
+// Plan creation: the bridge between an Order and an executable Steps list.
+//
+// Responsibility: given a module and an Order, query current state,
+// diff against desired state, and return an ordered Plan.
+// This file does NOT execute steps and does NOT write to disk —
+// those concerns belong to the executor and plan_store respectively.
+
 use crate::{Order, PropertyValue, module_resolver::ModuleId};
-use serde;
 use shared_libs::Steps;
 use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
 
-/// A generated execution plan.
-/// Carries its own `module_id` so `approve_plan()` can dispatch without extra parameters.
-#[derive(serde::Deserialize)]
+// ── Plan ─────────────────────────────────────────────────────────────────────
+
+/// A fully resolved execution plan, ready for user approval.
+///
+/// `Plan` is a pure data carrier — it does not save itself, update statuses,
+/// or execute anything. All side effects are handled by `plan_store` and
+/// `executor` in the engine layer.
+///
+/// Both `Serialize` and `Deserialize` are derived so that the full plan
+/// (including Step data) can be written to and reconstructed from disk.
+/// This is required for the future rollback feature.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Plan {
     pub id: String,
     pub module_id: ModuleId,
     pub target: String,
+    /// Human-readable summary shown to the user before approval.
     pub output: String,
+    /// The ordered operations to execute. Preserved in the plan file
+    /// (not just descriptions) to support future rollback.
     pub steps: Steps,
-}
-
-impl Plan {
-    fn plans_dir() -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".yast3").join("plans")
-    }
-
-    /// Persists the plan to disk immediately after creation.
-    /// Steps are saved as descriptions only — the live Steps stay in memory for execution.
-    pub fn save(&self) -> Result<(), String> {
-        fs::create_dir_all(Self::plans_dir()).map_err(|e| e.to_string())?;
-
-        let data = serde_json::json!({
-            "id": self.id,
-            "target": self.target,
-            "status": "pending",
-            "steps": self.steps.iter().map(|s| s.description.clone()).collect::<Vec<_>>(),
-        });
-
-        let path = Self::plans_dir().join(format!("{}.plan.json", self.id));
-        fs::write(
-            path,
-            serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())
-    }
 }
 
 // ── ID Generation ────────────────────────────────────────────────────────────
 
 /// Generates a human-readable, sortable, collision-resistant plan ID.
-/// Format: `<domain_prefix>_<YYYYMMDD>_<HHMMSS>_<4hex>`
-/// Example: `svc_20260325_143022_a3f2`
+///
+/// Format:  `<domain_prefix>_<YYYYMMDD>_<HHMMSS>_<4hex>`
+/// Example: `svc_20260407_143022_a3f2`
+///
+/// The hex suffix is derived from sub-second nanoseconds, making
+/// same-second collisions practically impossible without a UUID library.
 fn generate_id(prefix: &str) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap();
+
     let timestamp = chrono::DateTime::from_timestamp(now.as_secs() as i64, 0)
         .unwrap()
         .format("%Y%m%d_%H%M%S")
         .to_string();
+
     let suffix = format!("{:04x}", (now.as_nanos() % 0x10000) as u16);
     format!("{}_{}_{}", prefix, timestamp, suffix)
 }
@@ -70,50 +66,43 @@ fn module_prefix(module: &ModuleId) -> &'static str {
 
 // ── Public Entry ─────────────────────────────────────────────────────────────
 
-pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Plan, String> {
+/// Builds a Plan for the given Order, or returns `None` if no changes are needed.
+///
+/// Returning `None` (instead of a Plan with empty steps) eliminates the need
+/// for callers to inspect `plan.steps.is_empty()` and avoids the zombie Plan
+/// with `id: String::new()` that previously existed for the empty-steps case.
+pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, String> {
     let target = order.target.clone().ok_or("No target provided")?;
-    let props = &order.desired_properties;
 
     let steps: Steps = match module {
-        ModuleId::Services => plan_services(target.clone(), props)?,
+        ModuleId::Services => plan_services(target.clone(), &order.desired_properties)?,
     };
 
-    // Handle empty plan BEFORE building full plan
+    // No diff = already at desired state. Signal this cleanly with None.
     if steps.is_empty() {
-        return Ok(Plan {
-            id: String::new(),
-            module_id: module.clone(),
-            target: target.clone(),
-            output: format!(
-                "✔ '{}' is already in the desired state — no changes needed.",
-                target
-            ),
-            steps,
-        });
+        return Ok(None);
     }
 
     let output = format!(
-        "=====Plan for '{}':=====\n{}\n==========================",
+        "=== Plan for '{}' ===\n{}\n=====================",
         target,
         steps
             .iter()
-            .map(|s| s.description.clone())
+            .map(|s| format!("  • {}", s.description))
             .collect::<Vec<_>>()
             .join("\n")
     );
 
-    let plan = Plan {
+    Ok(Some(Plan {
         id: generate_id(module_prefix(module)),
         module_id: module.clone(),
         target,
         output,
         steps,
-    };
-
-    Ok(plan)
+    }))
 }
 
-// ── Module-Specific Planners ─────────────────────────────────────────────────
+// ── Module-Specific Planners ──────────────────────────────────────────────────
 
 fn plan_services(target: String, props: &HashMap<String, PropertyValue>) -> Result<Steps, String> {
     let current = services::state_helpers::ServiceCurrentState::new(&target)?;
