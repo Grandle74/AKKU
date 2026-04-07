@@ -1,5 +1,24 @@
+// cli/src/main.rs
+//
+// commando — the developer/tester reference CLI for YaST3.
+//
+// This is NOT a consumer-facing tool. It is a reference implementation
+// that demonstrates how a frontend should call the API layer. Future
+// frontends (GUI, TUI, web) should model their integration on this file.
+//
+// Responsibilities:
+//   - Parse raw input into intent parts and run-mode flags.
+//   - Route to the correct API function based on intent shape.
+//   - Render IntentOutcome variants to the terminal.
+//   - Handle the approval prompt (Trip 2) for the Normal run mode.
+//
+// Dependency rule: this crate imports ONLY `api`. It never imports
+// `engine`, `shared_libs`, or any module crate directly. All types
+// needed from lower layers are re-exported through `api`.
+
 use api::{
-    IntentOutcome, PropertyValue, RunMode, approve_intent, process_bi_intent, process_tri_intent,
+    Action, IntentOutcome, PropertyValue, RunMode, approve_intent, process_bi_intent,
+    process_tri_intent,
 };
 use rustyline::error::ReadlineError;
 use std::collections::HashMap;
@@ -9,7 +28,7 @@ fn main() {
     println!("Welcome to YaST3 (prototype)!");
     println!(
         "This is a prototype of YaST3, a system configuration tool.\n{}",
-        "─".repeat(56)
+        "─".repeat(62)
     );
     println!("Enter \"help\" for commands list\n");
 
@@ -54,144 +73,215 @@ fn main() {
     }
 }
 
+// ── Intent Routing ────────────────────────────────────────────────────────────
+
+/// Routes a parsed command to the correct API call based on its shape.
+///
+/// Intent shapes:
+///   1 part  → `domain`                        → hint to use help
+///   2 parts → `domain action`                 → bi-intent (Meta only)
+///   3 parts → `domain action target`          → tri-intent (Custom/Config)
+///   4+ parts→ `domain cfg target key=val ...` → declarative tri-intent
 fn handle_intent(parts: &[String], mode: RunMode) {
     let domain = &parts[0];
+
     match parts.len() {
-        1 => println!("See '{} help' for more information.", domain),
+        1 => println!("See '{} help' for available commands.", domain),
+
         2 => {
             let action = &parts[1];
             print_result(action, process_bi_intent(domain, action));
         }
+
         3 => {
             let action = &parts[1];
-            let res = process_tri_intent(
+            let result = process_tri_intent(
                 domain,
                 action.clone(),
                 parts[2].clone(),
                 HashMap::new(),
                 &mode,
             );
-            match res {
-                Ok(outcome) => render_outcome(action, outcome),
-                Err(errors) => print_result(action, Err(errors)),
-            }
+            handle_outcome(action, result);
         }
+
         _ => handle_declarative(domain, parts, mode),
     }
 }
 
+/// Handles the declarative path: `domain cfg <target> key=value ...`
+///
+/// Only `cfg`, `config`, and `change` are valid declarative action keywords.
+/// All other multi-token commands are rejected here with a clear error.
 fn handle_declarative(domain: &str, parts: &[String], mode: RunMode) {
     let action = parts[1].to_string();
     let target = parts[2].to_string();
-    let mut properties = HashMap::new();
 
-    if action != "change" && action != "config" && action != "cfg" {
-        println!("✗ Error: Invalid command — check '{} help'", domain);
+    // Guard: only declarative keywords reach this path.
+    // Any unknown multi-token command gets a clear rejection instead of
+    // a confusing parse error deeper in the stack.
+    if !matches!(action.as_str(), "cfg" | "config" | "change") {
+        println!("✗ Error: Invalid command — see '{} help'", domain);
         return;
     }
 
+    let mut properties: HashMap<String, PropertyValue> = HashMap::new();
+
     for token in &parts[3..] {
-        if let Some((key, value)) = token.split_once('=') {
-            if key.is_empty() {
-                println!("✗ Error: Invalid property");
-                return;
-            }
-            let parsed = match value {
-                "true" | "yes" | "1" => PropertyValue::Bool(true),
-                "false" | "no" | "0" => PropertyValue::Bool(false),
-                _ => value
-                    .parse::<i64>()
-                    .map(PropertyValue::Number)
-                    .unwrap_or_else(|_| PropertyValue::String(value.to_string())),
-            };
-            if properties.insert(key.to_string(), parsed).is_some() {
-                println!("✗ Error: Duplicated property '{}'", key);
-                return;
-            }
-        } else {
-            println!("✗ Error: Property must be in key=value format");
+        let Some((key, value)) = token.split_once('=') else {
+            println!("✗ Error: Property '{}' must be in key=value format", token);
+            return;
+        };
+
+        if key.is_empty() {
+            println!("✗ Error: Property key cannot be empty");
             return;
         }
+
+        // Reject duplicate keys before sending to the API — HashMap would
+        // silently accept the last value, discarding the first.
+        if properties.contains_key(key) {
+            println!("✗ Error: Duplicate property '{}'", key);
+            return;
+        }
+
+        let parsed = match value {
+            "true" | "yes" | "1" => PropertyValue::Bool(true),
+            "false" | "no" | "0" => PropertyValue::Bool(false),
+            _ => value
+                .parse::<i64>()
+                .map(PropertyValue::Number)
+                .unwrap_or_else(|_| PropertyValue::String(value.to_string())),
+        };
+
+        properties.insert(key.to_string(), parsed);
     }
 
     if properties.is_empty() {
-        println!("✗ Error: No properties provided");
+        println!("✗ Error: No properties provided — see '{} help'", domain);
         return;
     }
 
-    match process_tri_intent(domain, action.clone(), target, properties, &mode) {
-        Ok(outcome) => render_outcome(&action, outcome),
-        Err(errors) => print_result(&action, Err(errors)),
+    handle_outcome(
+        &action,
+        process_tri_intent(domain, action.clone(), target, properties, &mode),
+    );
+}
+
+// ── Outcome Rendering ─────────────────────────────────────────────────────────
+
+/// Unpacks an API result and routes it to the appropriate render function.
+fn handle_outcome(action: &str, result: Result<IntentOutcome, Vec<String>>) {
+    match result {
+        Ok(outcome) => render_outcome(action, outcome),
+        Err(errors) => print_result(action, Err(errors)),
     }
 }
 
+/// Renders an IntentOutcome variant to the terminal.
+///
+/// Each variant maps to a distinct user experience:
+///   Immediate          → print output directly
+///   DryRun             → print the plan, no prompt
+///   RequiresApproval   → print plan, prompt user, execute Trip 2
+///   AutoApplied        → print plan + banner + result
+///   ApplyFailed        → print plan + banner + errors
 fn render_outcome(action: &str, outcome: IntentOutcome) {
     match outcome {
-        IntentOutcome::Immediate(out) => print_result(action, Ok(out)),
-        IntentOutcome::DryRun { plan_text } => print_lines(plan_text),
+        IntentOutcome::Immediate(output) => {
+            print_result(action, Ok(output));
+        }
+
+        IntentOutcome::DryRun { plan_text } => {
+            print_lines(&plan_text);
+        }
+
         IntentOutcome::RequiresApproval { plan, plan_text } => {
-            print_lines(plan_text);
+            print_lines(&plan_text);
+
             print!("\nApply this plan? [y/N]: ");
             io::stdout().flush().unwrap();
+
             let mut input = String::new();
             io::stdin().read_line(&mut input).unwrap();
             let approved = matches!(input.trim().to_lowercase().as_str(), "y" | "yes");
+
             print_result(action, approve_intent(plan, approved));
         }
+
         IntentOutcome::AutoApplied {
             plan_text,
             result_text,
         } => {
-            print_lines(plan_text);
+            print_lines(&plan_text);
             println!("\n⚡ --force: auto-approving plan.");
             print_result(action, Ok(result_text));
         }
+
         IntentOutcome::ApplyFailed { plan_text, errors } => {
-            print_lines(plan_text);
+            print_lines(&plan_text);
             println!("\n⚡ --force: auto-approving plan.");
             print_result(action, Err(errors));
         }
     }
 }
 
-fn print_result(action: &str, result: Result<Vec<String>, Vec<String>>) {
+// ── Output Helpers ────────────────────────────────────────────────────────────
+
+/// Prints a result with a "✔" or "✗" prefix.
+///
+/// Uses `Action::is_informational()` (defined in shared_libs, re-exported
+/// through api) to determine whether a success prefix is appropriate.
+/// This keeps the CLI free of hardcoded action name strings.
+fn print_result(action_str: &str, result: Result<Vec<String>, Vec<String>>) {
+    let action = Action::from(action_str);
+
     match result {
         Ok(output) => {
-            if !matches!(action, "list" | "help" | "status") {
+            if !action.is_informational() {
+                // Only prepend "✔ " if the output doesn't already carry one.
+                // Avoids double-prefixing from module-level success messages.
                 if !output.first().map_or(false, |s| s.starts_with('✔')) {
                     print!("✔ ");
                 }
             }
-            print_lines(output);
+            print_lines(&output);
         }
         Err(errors) => {
             print!("✗ Error: ");
-            print_lines(errors);
+            print_lines(&errors);
         }
     }
 }
 
-fn print_lines<T: std::fmt::Display>(items: impl IntoIterator<Item = T>) {
+fn print_lines(items: &[String]) {
     for item in items {
         println!("{}", item);
     }
 }
 
+// ── Input Parsing ─────────────────────────────────────────────────────────────
+
+/// Strips `--dry-run` and `--force` flags from the token stream and
+/// returns the cleaned parts alongside the resolved RunMode.
+///
+/// `--force` takes priority over `--dry-run` if both are present.
 fn parse_flags(input: &str) -> (Vec<String>, RunMode) {
     let mut dry_run = false;
     let mut force = false;
+
     let parts: Vec<String> = input
         .split_whitespace()
-        .filter(|t| {
-            if *t == "--dry-run" {
+        .filter(|t| match *t {
+            "--dry-run" => {
                 dry_run = true;
                 false
-            } else if *t == "--force" {
+            }
+            "--force" => {
                 force = true;
                 false
-            } else {
-                true
             }
+            _ => true,
         })
         .map(String::from)
         .collect();
@@ -203,24 +293,14 @@ fn parse_flags(input: &str) -> (Vec<String>, RunMode) {
     } else {
         RunMode::Normal
     };
+
     (parts, mode)
 }
 
+// ── Help ──────────────────────────────────────────────────────────────────────
+
+const CLI_HELP: &str = include_str!("../doc/help.txt");
+
 fn show_help() {
-    println!("\n=== Available Commands ===");
-    println!("  help              - Show this help message");
-    println!("  clear             - Clear the screen");
-    println!("  exit              - Exit the program");
-    println!("\n=== Module Commands ===");
-    println!("  Imperative style (single action):");
-    println!("    service <action> [name]");
-    println!("    Examples:");
-    println!("      service list");
-    println!("      service status nginx");
-    println!("\n  Declarative style (desired state):");
-    println!("    service change <name> <property>=<value> ...");
-    println!("    Properties: running, enabled, masked");
-    println!("    Examples:");
-    println!("      service change nginx running=true enabled=true");
-    println!("      service change nginx masked=false\n");
+    println!("\n{}", CLI_HELP);
 }
