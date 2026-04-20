@@ -141,7 +141,7 @@ pub fn to_steps(delta: &Delta) -> Steps {
 
     // Cleaning service failure if failed at somepoint
     if delta.needs_reset_failed {
-        steps.push(Step::new(Domain::Services, "reset-failed", target));
+        steps.push(Step::new(Domain::Services, "reset", target));
     }
     if delta.needs_unmask {
         steps.push(Step::new(Domain::Services, "unmask", target));

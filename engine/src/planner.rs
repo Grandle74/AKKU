@@ -31,6 +31,8 @@ pub struct Plan {
     #[serde(skip)]
     pub output: Vec<String>,
     pub steps: Steps,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rollback_of: Option<String>,
 }
 
 // ── ID Generation ─────────────────────────────────────────────────────────────
@@ -94,6 +96,7 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
         target,
         output,
         steps,
+        rollback_of: None,
     }))
 }
 

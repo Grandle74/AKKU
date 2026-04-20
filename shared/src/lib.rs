@@ -31,11 +31,22 @@ pub enum Action {
 
 impl Action {
     /// Returns true for actions whose output is purely informational and should
-    /// NOT receive the leading "✔ " success prefix in the CLI.
+    /// NOT receive the leading "✔ " success prefix in the Frontend.
     ///
-    /// Centralised here so the CLI never needs to string-match action names.
+    /// Centralised here so the Frontend never needs to string-match action names.
     pub fn is_informational(&self) -> bool {
         matches!(self, Action::Meta(_)) || matches!(self, Action::Custom(s) if s == "status")
+    }
+
+    /// Returns the action name as a plain string.
+    /// Used by plan_store to write a flat, human-readable action field
+    /// instead of the enum's serialized form.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Action::Custom(s) => s.as_str(),
+            Action::Meta(s) => s.as_str(),
+            Action::Config => "config",
+        }
     }
 }
 
@@ -123,6 +134,10 @@ pub struct Step {
     pub target: String,
     /// Human-readable summary used in plan output and saved to the plan file.
     pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<Vec<String>>,
 }
 
 impl Step {
@@ -132,6 +147,8 @@ impl Step {
             domain,
             action: Action::Custom(action.to_string()),
             target: target.to_string(),
+            status: None,
+            output: None,
         }
     }
 }

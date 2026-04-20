@@ -70,7 +70,7 @@ pub fn execute_services(order: &Order) -> Result<Vec<String>, String> {
 pub fn execute_services_plan(plan: &Plan) -> Result<Vec<String>, Vec<String>> {
     let mut output = vec![];
 
-    for step in &plan.steps {
+    for (index, step) in plan.steps.iter().enumerate() {
         match &step.action {
             Action::Custom(action) => {
                 let result = match action.as_str() {
@@ -80,12 +80,30 @@ pub fn execute_services_plan(plan: &Plan) -> Result<Vec<String>, Vec<String>> {
                     "disable" => services::disable_service(&step.target),
                     "mask" => services::mask_service(&step.target),
                     "unmask" => services::unmask_service(&step.target),
+                    "reset" => services::reset_service(),
                     _ => return Err(vec![format!("Unknown step action '{}'", action)]),
                 };
 
                 match result {
-                    Ok(mut lines) => output.append(&mut lines),
-                    Err(e) => return Err(vec![e]),
+                    Ok(mut lines) => {
+                        let _ = crate::plan_store::update_step_status(
+                            &plan.id,
+                            index,
+                            "completed",
+                            &lines,
+                        );
+                        output.append(&mut lines);
+                    }
+                    Err(e) => {
+                        let error_lines: Vec<String> = e.lines().map(String::from).collect();
+                        let _ = crate::plan_store::update_step_status(
+                            &plan.id,
+                            index,
+                            "failed",
+                            &error_lines,
+                        );
+                        return Err(vec![e]);
+                    }
                 }
             }
 

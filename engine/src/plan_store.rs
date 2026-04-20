@@ -21,7 +21,6 @@
 // `id` encodes the creation timestamp — no separate `created_at` field is needed.
 
 use crate::planner::Plan;
-use shared_libs::Action;
 use std::{fs, path::PathBuf};
 
 fn plans_dir() -> PathBuf {
@@ -31,18 +30,6 @@ fn plans_dir() -> PathBuf {
 
 fn plan_path(id: &str) -> PathBuf {
     plans_dir().join(format!("{}.plan.json", id))
-}
-
-/// A flat, file-facing representation of a Step.
-///
-/// Keeps `action` as a plain string rather than the `Action` enum's
-/// serialized form (`{"Custom": "start"}`), which is an internal
-/// dispatch detail with no value in the audit file.
-#[derive(serde::Serialize)]
-struct StepRecord<'a> {
-    action: &'a str,
-    target: &'a str,
-    description: &'a str,
 }
 
 /// Persists a Plan to disk with status `"pending"`.
@@ -56,30 +43,29 @@ struct StepRecord<'a> {
 pub fn save(plan: &Plan) -> Result<(), String> {
     fs::create_dir_all(plans_dir()).map_err(|e| e.to_string())?;
 
-    let steps: Vec<StepRecord> = plan
+    let steps: Vec<serde_json::Value> = plan
         .steps
         .iter()
         .map(|s| {
-            // Steps produced by `to_steps()` are always Custom — the fallback
-            // "unknown" is a safety net for any future bug, not a reachable path.
-            let action_str = match &s.action {
-                Action::Custom(a) => a.as_str(),
-                _ => "unknown",
-            };
-            StepRecord {
-                action: action_str,
-                target: &s.target,
-                description: &s.description,
-            }
+            serde_json::json!({
+                "action":      s.action.as_str(),
+                "target":      s.target,
+                "description": s.description,
+            })
         })
         .collect();
 
-    let data = serde_json::json!({
+    let mut data = serde_json::json!({
         "id":     plan.id,
         "target": plan.target,
         "status": "pending",
         "steps":  steps,
     });
+
+    // Only written when this plan is a rollback — absent otherwise.
+    if let Some(ref origin_id) = plan.rollback_of {
+        data["rollback_of"] = serde_json::json!(origin_id);
+    }
 
     fs::write(
         plan_path(&plan.id),
@@ -100,6 +86,28 @@ pub fn update_status(id: &str, status: &str) -> Result<(), String> {
     let mut data: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
 
     data["status"] = serde_json::json!(status);
+
+    fs::write(
+        plan_path(id),
+        serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Updates the status of a single step by index.
+/// Also adds the result output for each step.
+/// Called by the executor after each step completes or fails.
+pub fn update_step_status(
+    id: &str,
+    step_index: usize,
+    status: &str,
+    output: &[String],
+) -> Result<(), String> {
+    let content = fs::read_to_string(plan_path(id)).map_err(|e| e.to_string())?;
+    let mut data: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    data["steps"][step_index]["status"] = serde_json::json!(status);
+    data["steps"][step_index]["output"] = serde_json::json!(output);
 
     fs::write(
         plan_path(id),
