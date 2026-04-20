@@ -80,8 +80,8 @@ fn main() {
 /// Intent shapes:
 ///   1 part  → `domain`                        → hint to use help
 ///   2 parts → `domain action`                 → bi-intent (Meta only)
-///   3 parts → `domain action target`          → tri-intent (Custom/Config)
-///   4+ parts→ `domain cfg target key=val ...` → declarative tri-intent
+///   3 parts → `domain action target`          → tri-intent (Custom only)
+///   4+ parts→ `domain cfg target key=val ...` → declarative tri-intent (Config only)
 fn handle_intent(parts: &[String], mode: RunMode) {
     let domain = &parts[0];
 

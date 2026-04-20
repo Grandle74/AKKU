@@ -16,11 +16,13 @@ use std::process::Command;
 // ── Current State ────────────────────────────────────────────────────────────
 
 /// The live state of a service as reported by systemd.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct ServiceCurrentState {
     pub name: String,
     pub active: bool,
     pub enabled: bool,
     pub masked: bool,
+    pub failed: bool,
 }
 
 impl ServiceCurrentState {
@@ -72,6 +74,7 @@ impl ServiceCurrentState {
             // "static" means the unit has no [Install] section but IS enabled in practice.
             enabled: matches!(unit_file_state.as_str(), "enabled" | "static"),
             masked: unit_file_state == "masked",
+            failed: active_state == "failed",
         })
     }
 }
@@ -118,6 +121,8 @@ pub fn calc(current: &ServiceCurrentState, desired: &ServiceDesiredState) -> Del
         needs_disable: desired.enabled == Some(false) && current.enabled,
         needs_unmask: desired.masked == Some(false) && current.masked,
         needs_mask: desired.masked == Some(true) && !current.masked,
+        needs_reset_failed: current.failed
+            && (desired.active.is_some() || desired.enabled.is_some()),
     }
 }
 
@@ -134,6 +139,10 @@ pub fn to_steps(delta: &Delta) -> Steps {
     let mut steps = vec![];
     let target = delta.target.as_deref().unwrap_or_default();
 
+    // Cleaning service failure if failed at somepoint
+    if delta.needs_reset_failed {
+        steps.push(Step::new(Domain::Services, "reset-failed", target));
+    }
     if delta.needs_unmask {
         steps.push(Step::new(Domain::Services, "unmask", target));
     }

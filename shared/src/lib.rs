@@ -106,6 +106,7 @@ pub struct Delta {
     pub needs_unmask: bool,
     pub needs_enable: bool,
     pub needs_disable: bool,
+    pub needs_reset_failed: bool,
 }
 
 /// An ordered list of atomic operations to execute in sequence.
