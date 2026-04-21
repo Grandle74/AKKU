@@ -83,15 +83,16 @@ pub fn process_tri_intent(
     let action = Action::from(action_str.as_str());
     let domain = validate_request(domain_str, &action, &properties)?;
 
+    let is_config = matches!(action, Action::Config);
     let result = execute_order(Order {
         domain,
-        action: action.clone(),
+        action: action,
         target: Some(target),
         desired_properties: properties,
     })?;
 
     // Non-Config actions always execute immediately — the engine returns no plan.
-    if !matches!(action, Action::Config) {
+    if !is_config {
         return Ok(IntentOutcome::Immediate(result.output));
     }
 

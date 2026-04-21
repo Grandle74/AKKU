@@ -74,10 +74,9 @@ fn module_prefix(module: &ModuleId) -> &'static str {
 /// `None` means the service is already at the desired state — the caller
 /// should surface this to the user without creating a plan file.
 pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, String> {
-    let target = order.target.clone().ok_or("No target provided")?;
-
+    let target = order.target.as_deref().ok_or("No target provided")?;
     let steps: Steps = match module {
-        ModuleId::Services => plan_services(target.clone(), &order.desired_properties)?,
+        ModuleId::Services => plan_services(target, &order.desired_properties)?,
     };
 
     if steps.is_empty() {
@@ -93,7 +92,7 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
     Ok(Some(Plan {
         id: generate_id(module_prefix(module)),
         module_id: module.clone(),
-        target,
+        target: target.to_string(), // one allocation, only here, only for the Plan
         output,
         steps,
         rollback_of: None,
@@ -102,8 +101,8 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
 
 // ── Module-Specific Planners ──────────────────────────────────────────────────
 
-fn plan_services(target: String, props: &HashMap<String, PropertyValue>) -> Result<Steps, String> {
-    let current = services::state_helpers::ServiceCurrentState::new(&target)?;
+fn plan_services(target: &str, props: &HashMap<String, PropertyValue>) -> Result<Steps, String> {
+    let current = services::state_helpers::ServiceCurrentState::new(target)?;
     let desired = services::state_helpers::ServiceDesiredState::from_props(target, props)?;
     let delta = services::state_helpers::calc(&current, &desired);
     Ok(services::state_helpers::to_steps(&delta))

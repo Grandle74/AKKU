@@ -93,12 +93,9 @@ pub struct ServiceDesiredState {
 }
 
 impl ServiceDesiredState {
-    pub fn from_props(
-        name: String,
-        props: &HashMap<String, PropertyValue>,
-    ) -> Result<Self, String> {
+    pub fn from_props(name: &str, props: &HashMap<String, PropertyValue>) -> Result<Self, String> {
         Ok(ServiceDesiredState {
-            name,
+            name: name.to_string(),
             active: props.get("running").and_then(|v| v.as_bool()),
             enabled: props.get("enabled").and_then(|v| v.as_bool()),
             masked: props.get("masked").and_then(|v| v.as_bool()),

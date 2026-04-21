@@ -63,7 +63,7 @@ pub fn save(plan: &Plan) -> Result<(), String> {
     });
 
     // Only written when this plan is a rollback — absent otherwise.
-    if let Some(ref origin_id) = plan.rollback_of {
+    if let Some(origin_id) = &plan.rollback_of {
         data["rollback_of"] = serde_json::json!(origin_id);
     }
 
