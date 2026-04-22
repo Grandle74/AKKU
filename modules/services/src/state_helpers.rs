@@ -146,14 +146,14 @@ pub fn to_steps(delta: &Delta) -> Steps {
     if delta.needs_enable {
         steps.push(Step::new(Domain::Services, "enable", target));
     }
+    if delta.needs_disable {
+        steps.push(Step::new(Domain::Services, "disable", target));
+    }
     if delta.needs_start {
         steps.push(Step::new(Domain::Services, "start", target));
     }
     if delta.needs_stop {
         steps.push(Step::new(Domain::Services, "stop", target));
-    }
-    if delta.needs_disable {
-        steps.push(Step::new(Domain::Services, "disable", target));
     }
     if delta.needs_mask {
         steps.push(Step::new(Domain::Services, "mask", target));

@@ -21,6 +21,7 @@ mod planner;
 
 pub use module_resolver::ModuleId;
 pub use planner::Plan;
+mod snapshot;
 
 /// Public wrapper so the API layer can persist a plan without importing
 /// plan_store directly. plan_store stays a private engine implementation detail.
@@ -116,6 +117,13 @@ pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<Strin
         // but we don't surface a file-write error to the user for a rejection.
         let _ = plan_store::update_status(&plan.id, "rejected");
         return Ok(vec!["Plan rejected.".to_string()]);
+    }
+
+    // State must be captured before any changes are made.
+    // If this fails, nothing has been touched yet — safe to abort cleanly.
+    if let Err(e) = snapshot::save(&plan.id, &plan.module_id, &plan.target) {
+        let _ = plan_store::update_status(&plan.id, "aborted");
+        return Err(vec![e]);
     }
 
     // Mark as executing BEFORE the first step. If the process crashes mid-flight,

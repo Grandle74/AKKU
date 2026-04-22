@@ -1,4 +1,4 @@
-// modules/services/src/error_catcher.rs
+// modules/services/src/systemctl_queries.rs
 use std::process::Command;
 
 /// Properties queried from systemd after running a start/stop command.
