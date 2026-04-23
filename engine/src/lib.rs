@@ -103,7 +103,7 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
     }
 }
 
-// ── Trip 2 ───────────────────────────────────────────────────────────────────
+// ── Trip 2 (Normal) ───────────────────────────────────────────────────────────────────
 
 /// Acts on a user's approval or rejection of a pending Plan.
 ///
@@ -113,17 +113,16 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
 /// updated here for audit-trail purposes.
 pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<String>> {
     if !approved {
-        // Best-effort status update — a rejection is recorded for the audit trail
-        // but we don't surface a file-write error to the user for a rejection.
         let _ = plan_store::update_status(&plan.id, "rejected");
         return Ok(vec!["Plan rejected.".to_string()]);
     }
 
-    // State must be captured before any changes are made.
-    // If this fails, nothing has been touched yet — safe to abort cleanly.
-    if let Err(e) = snapshot::save(&plan.id, &plan.module_id.to_domain(), &plan.target) {
-        let _ = plan_store::update_status(&plan.id, "aborted");
-        return Err(vec![e]);
+    // Rollback plans skip snapshot — restoring a broken state is meaningless.
+    if plan.rollback_of.is_none() {
+        if let Err(e) = snapshot::save(&plan.id, &plan.module_id.to_domain(), &plan.target) {
+            let _ = plan_store::update_status(&plan.id, "aborted");
+            return Err(vec![e]);
+        }
     }
 
     // Mark as executing BEFORE the first step. If the process crashes mid-flight,
@@ -132,16 +131,41 @@ pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<Strin
 
     let result = executor::execute_plan(&plan);
 
-    // Always record the final outcome — a clean audit trail is non-negotiable.
     match &result {
         Ok(_) => {
             let _ = plan_store::update_status(&plan.id, "completed");
         }
         Err(_) => {
             let _ = plan_store::update_status(&plan.id, "failed");
-            // TODO: Rollback hook — pass plan.id to rollback logic.
         }
     }
 
     result
+}
+
+// ── Direct Trip (Rollback) ─────────────────────────────────────────────────────────
+
+/// Restores a target to its pre-execution state by loading the snapshot
+/// captured before the original plan ran.
+///
+/// Executes immediately without user approval — mirrors --force behavior.
+/// No snapshot is taken before this execution (rollback_of is Some).
+pub fn rollback_plan(origin_plan_id: &str) -> Result<Vec<String>, Vec<String>> {
+    let snapshot = snapshot::load(origin_plan_id).map_err(|e| vec![e])?;
+    let order = snapshot.to_order().map_err(|e| vec![e])?;
+
+    let module = module_resolver::ModuleId::resolve(&order.domain).map_err(|e| vec![e])?;
+    let maybe_plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
+
+    let Some(mut plan) = maybe_plan else {
+        return Ok(vec![
+            "Target is already at the pre-execution state — nothing to restore.".to_string(),
+        ]);
+    };
+
+    plan.rollback_of = Some(origin_plan_id.to_string());
+
+    save_plan(&plan).map_err(|e| vec![e])?;
+
+    approve_plan(plan, true)
 }
