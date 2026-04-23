@@ -186,6 +186,8 @@ fn handle_outcome(action: &str, result: Result<IntentOutcome, Vec<String>>) {
 ///   RequiresApproval   → print plan, prompt user, execute Trip 2
 ///   AutoApplied        → print plan + banner + result
 ///   ApplyFailed        → print plan + banner + errors
+// In cli/src/main.rs — replace render_outcome entirely:
+
 fn render_outcome(action: &str, outcome: IntentOutcome) {
     match outcome {
         IntentOutcome::Immediate(output) => {
@@ -206,10 +208,12 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
             io::stdin().read_line(&mut input).unwrap();
             let approved = matches!(input.trim().to_lowercase().as_str(), "y" | "yes");
 
+            // approve_intent handles auto-rollback internally on failure.
+            // The result lines already contain the rollback outcome narrative.
             print_result(action, approve_intent(plan, approved));
         }
 
-        IntentOutcome::AutoApplied {
+        IntentOutcome::Applied {
             plan_text,
             result_text,
         } => {
@@ -218,10 +222,53 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
             print_result(action, Ok(result_text));
         }
 
-        IntentOutcome::ApplyFailed { plan_text, errors } => {
+        IntentOutcome::ApplyFailedRolledBack {
+            plan_text,
+            exec_errors,
+            rollback_text,
+        } => {
             print_lines(&plan_text);
             println!("\n⚡ --force: auto-approving plan.");
-            print_result(action, Err(errors));
+            println!("✗ Error: Execution failed — state restored.");
+            print_lines(&exec_errors);
+            println!("\n↩ Rollback steps applied:");
+            print_lines(&rollback_text);
+        }
+
+        IntentOutcome::ApplyFailedRollbackFailed {
+            plan_text,
+            exec_errors,
+            rollback_errors,
+        } => {
+            print_lines(&plan_text);
+            println!("\n⚡ --force: auto-approving plan.");
+            println!("✗ Error: Execution failed — rollback also failed. System state is unknown.");
+            println!("\nExecution errors:");
+            print_lines(&exec_errors);
+            println!("\nRollback errors:");
+            print_lines(&rollback_errors);
+        }
+
+        // ── Manual rollback outcomes (rendered by History flow — not yet in CLI) ──
+        // These are wired and ready. The CLI will route here once `rollback_intent`
+        // is called from the History command.
+        IntentOutcome::RolledBack {
+            origin_plan_id,
+            rollback_text,
+        } => {
+            println!("✔ Rolled back plan '{}'.", origin_plan_id);
+            print_lines(&rollback_text);
+        }
+
+        IntentOutcome::RollbackFailed {
+            origin_plan_id,
+            errors,
+        } => {
+            println!(
+                "✗ Rollback of plan '{}' failed — system state may be inconsistent.",
+                origin_plan_id
+            );
+            print_lines(&errors);
         }
     }
 }
