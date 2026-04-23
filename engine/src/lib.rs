@@ -62,7 +62,7 @@ pub struct EngineResult {
 /// returns the Plan when one is created — what the API does with it is
 /// the API's concern.
 pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
-    let module = module_resolver::resolve(&order.domain).map_err(|e| vec![e])?;
+    let module = module_resolver::ModuleId::resolve(&order.domain).map_err(|e| vec![e])?;
 
     match &order.action {
         Action::Config => {
@@ -121,7 +121,7 @@ pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<Strin
 
     // State must be captured before any changes are made.
     // If this fails, nothing has been touched yet — safe to abort cleanly.
-    if let Err(e) = snapshot::save(&plan.id, &plan.module_id, &plan.target) {
+    if let Err(e) = snapshot::save(&plan.id, &plan.module_id.to_domain(), &plan.target) {
         let _ = plan_store::update_status(&plan.id, "aborted");
         return Err(vec![e]);
     }
