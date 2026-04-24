@@ -158,9 +158,7 @@ pub fn approve_intent(plan: Plan, approved: bool) -> Result<Vec<String>, IntentO
     if !approved {
         // engine_approve handles the plan_store status update for rejected plans.
         // Rejection always returns Ok("Plan rejected.") — the unwrap is safe.
-        return Ok(
-            engine_approve(plan, false).unwrap_or_else(|_| vec!["Plan rejected.".to_string()])
-        );
+        return Ok(engine_approve(plan, false).unwrap_or_else(|e| e));
     }
 
     let plan_id = plan.id.clone();

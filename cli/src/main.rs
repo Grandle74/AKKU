@@ -60,6 +60,9 @@ fn main() {
                     }
                     _ => handle_intent(&parts, mode),
                 }
+
+                // One blank line after every command's output, before the next prompt.
+                println!();
             }
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                 println!("Exiting...");
@@ -85,6 +88,7 @@ fn main() {
 fn handle_intent(parts: &[String], mode: RunMode) {
     let domain = &parts[0];
 
+    println!();
     match parts.len() {
         1 => println!("See '{} help' for available commands.", domain),
 
@@ -180,12 +184,12 @@ fn handle_outcome(action: &str, result: Result<IntentOutcome, Vec<String>>) {
 
 /// Renders an IntentOutcome variant to the terminal.
 ///
-/// Spacing rules:
-///   - One blank line before a plan block (it's the anchor of the output).
+/// Spacing rules (all variants):
+///   - One blank line before a plan block.
 ///   - One blank line before the approval prompt.
 ///   - One blank line before any status line (success, error, banner).
 ///   - One blank line before a rollback block.
-///   - No trailing blank line — the REPL prompt provides natural separation.
+///   - No trailing blank — handle_intent adds it uniformly after every command.
 fn render_outcome(action: &str, outcome: IntentOutcome) {
     match outcome {
         IntentOutcome::Immediate(output) => {
@@ -193,12 +197,10 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
         }
 
         IntentOutcome::DryRun { plan_text } => {
-            println!();
             print_lines(&plan_text);
         }
 
         IntentOutcome::RequiresApproval { plan, plan_text } => {
-            println!();
             print_lines(&plan_text);
 
             print!("\nApply this plan? [y/N]: ");
@@ -245,7 +247,7 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
 
         // ── Normal path failures ──────────────────────────────────────────────
         //
-        // No plan_text here — it was already printed before the approval prompt.
+        // No plan_text here — already printed before the approval prompt.
         IntentOutcome::ApplyFailedRolledBack {
             exec_errors,
             rollback_text,
@@ -254,7 +256,7 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
             println!();
             print_lines(&exec_errors);
             println!();
-            print_rollback_plan(&rollback_text);
+            print_rollback_block(&rollback_text);
         }
 
         IntentOutcome::ApplyFailedRollbackFailed {
@@ -274,13 +276,13 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
 
         // ── Manual rollback outcomes (History flow — not yet wired in CLI) ────
         //
-        // This is the sole action for this path, so the full plan block is shown.
+        // This is the sole action for this path, so the full block is shown.
         IntentOutcome::RolledBack {
             origin_plan_id: _,
             rollback_text,
         } => {
             println!();
-            print_rollback_plan(&rollback_text);
+            print_rollback_block(&rollback_text);
         }
 
         IntentOutcome::RollbackFailed {
@@ -325,20 +327,19 @@ fn print_result(action_str: &str, result: Result<Vec<String>, Vec<String>>) {
     }
 }
 
-/// Prints a rollback plan block with a balanced header/footer matching the
-/// style produced by the planner for normal plans.
+/// Prints a rollback output block with a balanced header/footer.
 ///
-/// Used for both auto-rollback (ApplyFailedRolledBack) and manual rollback
-/// (RolledBack). The steps are raw executor output lines — no target name is
-/// available at this point, so the header uses a fixed label.
-fn print_rollback_plan(steps: &[String]) {
-    let header = "=== Rollback Plan ===";
-    let footer = "=".repeat(header.len());
+/// `lines` is raw executor output — one line per step result.
+/// No bullets — these are outcome messages, not step descriptions.
+///
+/// Used for both auto-rollback (ApplyFailedRolledBack)
+/// and manual rollback (RolledBack).
+fn print_rollback_block(lines: &[String]) {
+    let header = "↩ Rollback applied:";
+    let divider = "─".repeat(header.len());
     println!("{}", header);
-    for line in steps {
-        println!("  • {}", line);
-    }
-    println!("{}", footer);
+    println!("{}", divider);
+    print_lines(lines);
 }
 
 fn print_lines(items: &[String]) {

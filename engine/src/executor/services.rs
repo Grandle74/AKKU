@@ -80,7 +80,7 @@ pub fn execute_services_plan(plan: &Plan) -> Result<Vec<String>, Vec<String>> {
                     "disable" => services::disable_service(&step.target),
                     "mask" => services::mask_service(&step.target),
                     "unmask" => services::unmask_service(&step.target),
-                    "reset" => services::reset_service(),
+                    "reset" => services::reset_failed_service(&step.target),
                     _ => return Err(vec![format!("Unknown step action '{}'", action)]),
                 };
 
