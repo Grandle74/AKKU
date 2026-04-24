@@ -83,16 +83,19 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
         return Ok(None);
     }
 
-    // Each step description becomes its own line so any frontend can
-    // render, join, or format the list however it sees fit.
-    let mut output = vec![format!("=== Plan for '{}' ===", target)];
+    // Header and footer share the same width so the box is balanced regardless
+    // of the target name length. Minimum width of 3 keeps very short names tidy.
+    let header = format!("=== Plan for '{}' ===", target);
+    let footer = "=".repeat(header.len());
+
+    let mut output = vec![header];
     output.extend(steps.iter().map(|s| format!("  • {}", s.description)));
-    output.push("=====================".to_string());
+    output.push(footer);
 
     Ok(Some(Plan {
         id: generate_id(module_prefix(module)),
         module_id: module.clone(),
-        target: target.to_string(), // one allocation, only here, only for the Plan
+        target: target.to_string(),
         output,
         steps,
         rollback_of: None,

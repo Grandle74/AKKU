@@ -7,16 +7,16 @@
 //   2. Call the engine with a well-formed Order.
 //   3. Resolve the engine's result into an IntentOutcome based on the run mode.
 //   4. Forward approval decisions back to the engine (Trip 2).
-//   5. Trigger auto-rollback when execution fails (API thinks, engine acts).
+//   5. Trigger auto-rollback when the user approves and execution fails (Normal path only).
 //   6. Expose rollback_intent for future manual rollback from the CLI History flow.
 //
 // The API does NOT execute systemctl commands and does NOT build Steps.
 // It also does NOT render output — that is the CLI's job.
 //
 // Rollback architecture:
-//   Auto-rollback  — triggered HERE by the API when approve_intent detects
-//                    execution failure. The engine has no opinion on whether
-//                    to roll back — it just executes what it's told.
+//   Auto-rollback  — triggered HERE when approve_intent detects execution failure.
+//                    Normal path only. --force fails and leaves state as-is,
+//                    so the user can manually rollback later via History.
 //   Manual rollback — triggered by rollback_intent(), called by the CLI after
 //                     the user picks a plan from History. Not yet wired in the
 //                     CLI (History is not implemented), but the full path exists.
@@ -49,23 +49,31 @@ pub enum IntentOutcome {
         result_text: Vec<String>,
     },
 
-    /// Plan execution failed, and auto-rollback restored the previous state.
-    ApplyFailedRolledBack {
+    /// Execution failed. --force only — state left as-is for manual rollback.
+    ApplyFailed {
         plan_text: Vec<String>,
+        exec_errors: Vec<String>,
+    },
+
+    /// User-approved execution failed and auto-rollback restored previous state.
+    ///
+    /// No plan_text — the CLI already rendered the plan before the approval prompt.
+    /// rollback_text is raw executor output; the CLI owns the rollback header.
+    ApplyFailedRolledBack {
         exec_errors: Vec<String>,
         rollback_text: Vec<String>,
     },
 
-    /// Plan execution failed, and auto-rollback also failed.
-    /// System state is unknown — the user must intervene manually.
+    /// User-approved execution failed and auto-rollback also failed.
+    ///
+    /// No plan_text — same reason as ApplyFailedRolledBack.
     ApplyFailedRollbackFailed {
-        plan_text: Vec<String>,
         exec_errors: Vec<String>,
         rollback_errors: Vec<String>,
     },
 
     /// Manual rollback completed successfully.
-    /// plan_text: the rollback plan steps that were executed.
+    /// rollback_text is raw executor output; the CLI owns the rollback plan header.
     RolledBack {
         origin_plan_id: String,
         rollback_text: Vec<String>,
@@ -138,40 +146,28 @@ pub fn process_tri_intent(
 /// Trip 2: forwards a user's approval decision to the engine.
 ///
 /// On execution failure the API — not the engine — decides to roll back.
-/// The engine only executes; the API is the layer that "thinks".
+/// Auto-rollback is the Normal path's safety net. --force has no auto-rollback
+/// by design: the user asserted control, the snapshot is on disk, History will
+/// let them undo manually.
 ///
 /// Returns Ok with success lines on approval + successful execution,
 /// or Ok with "Plan rejected." on rejection (not an error — user chose this),
-/// or Err with structured rollback outcome embedded in the error lines on failure.
-///
-/// NOTE: The return type is `Result<Vec<String>, Vec<String>>` — the Err branch
-/// carries human-readable lines that the CLI prints as-is. Rollback outcome
-/// detail is encoded in those lines. This keeps the CLI call site simple:
-///   `print_result(action, approve_intent(plan, approved))`
-/// Future frontends that need to distinguish rollback outcomes should instead
-/// call `approve_intent_structured()` (not yet added — add when needed).
-pub fn approve_intent(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<String>> {
-    // Rejection is a clean, non-error outcome — no rollback, no noise.
+/// or Err(IntentOutcome) on execution failure so the CLI can render the
+/// correct structured outcome without any string-parsing on its end.
+pub fn approve_intent(plan: Plan, approved: bool) -> Result<Vec<String>, IntentOutcome> {
     if !approved {
         // engine_approve handles the plan_store status update for rejected plans.
-        return engine_approve(plan, false).map_err(|e| e); // map_err is identity — Ok("Plan rejected.")
+        // Rejection always returns Ok("Plan rejected.") — the unwrap is safe.
+        return Ok(
+            engine_approve(plan, false).unwrap_or_else(|_| vec!["Plan rejected.".to_string()])
+        );
     }
 
     let plan_id = plan.id.clone();
-    let plan_text = plan.output.clone(); // retained for context in rollback error lines
 
     match engine_approve(plan, true) {
         Ok(output) => Ok(output),
-
-        Err(exec_errors) => {
-            // Execution failed — attempt auto-rollback immediately.
-            // The engine already marked the plan "failed" in plan_store.
-            Err(build_rollback_error_lines(
-                &plan_id,
-                &plan_text,
-                exec_errors,
-            ))
-        }
+        Err(exec_errors) => Err(build_rollback_outcome(&plan_id, exec_errors)),
     }
 }
 
@@ -180,10 +176,6 @@ pub fn approve_intent(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<Str
 ///
 /// Called by the CLI History flow once implemented — NOT called during normal
 /// approve/execute cycles. The plan_id comes from the user selecting a past plan.
-///
-/// Returns an IntentOutcome so the CLI can render the rollback result with the
-/// same machinery it uses for any other outcome. This also means future GUI/TUI
-/// frontends get structured data rather than pre-formatted strings.
 pub fn rollback_intent(origin_plan_id: &str) -> IntentOutcome {
     match engine::rollback_plan(origin_plan_id) {
         Ok(rollback_text) => IntentOutcome::RolledBack {
@@ -243,15 +235,17 @@ fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome
 
         RunMode::Force => {
             save_plan(&plan)?;
-            // approve_intent handles auto-rollback internally on failure.
-            match approve_intent(plan, true) {
+            // No auto-rollback on --force. The snapshot is on disk; if execution
+            // fails, the user decides what to do next via History.
+            match engine_approve(plan, true) {
                 Ok(result_text) => Ok(IntentOutcome::Applied {
                     plan_text,
                     result_text,
                 }),
-                // The error lines already encode the rollback outcome (see build_rollback_error_lines).
-                // We surface the full structured outcome so the CLI can render distinctly.
-                Err(error_lines) => resolve_force_failure(plan_text, error_lines),
+                Err(exec_errors) => Ok(IntentOutcome::ApplyFailed {
+                    plan_text,
+                    exec_errors,
+                }),
             }
         }
 
@@ -264,84 +258,22 @@ fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome
     }
 }
 
-/// Classifies a Force-path failure into the correct structured IntentOutcome.
+/// Attempts auto-rollback after a user-approved execution failure and returns
+/// the appropriate structured outcome.
 ///
-/// The error_lines from approve_intent carry a sentinel prefix so we can
-/// distinguish "rolled back cleanly" from "rollback also failed" without
-/// adding a separate return type to approve_intent.
-///
-/// This is the only place in the API that reads those sentinels.
-fn resolve_force_failure(
-    plan_text: Vec<String>,
-    error_lines: Vec<String>,
-) -> Result<IntentOutcome, Vec<String>> {
-    // Sentinels written by build_rollback_error_lines:
-    const ROLLED_BACK_SENTINEL: &str = "ROLLBACK:OK";
-    const ROLLBACK_FAILED_SENTINEL: &str = "ROLLBACK:FAILED";
-
-    // Split on the sentinel line, which is always first.
-    let sentinel = error_lines.first().map(String::as_str).unwrap_or("");
-
-    if sentinel == ROLLED_BACK_SENTINEL {
-        let (exec_errors, rollback_text) = split_on_divider(&error_lines[1..]);
-        Ok(IntentOutcome::ApplyFailedRolledBack {
-            plan_text,
+/// Only called by approve_intent — never by the Force path.
+/// plan_text is intentionally NOT threaded through — the CLI already rendered
+/// the plan before the approval prompt, so including it would cause a double-print.
+fn build_rollback_outcome(plan_id: &str, exec_errors: Vec<String>) -> IntentOutcome {
+    match engine::rollback_plan(plan_id) {
+        Ok(rollback_text) => IntentOutcome::ApplyFailedRolledBack {
             exec_errors,
             rollback_text,
-        })
-    } else if sentinel == ROLLBACK_FAILED_SENTINEL {
-        let (exec_errors, rollback_errors) = split_on_divider(&error_lines[1..]);
-        Ok(IntentOutcome::ApplyFailedRollbackFailed {
-            plan_text,
+        },
+        Err(rollback_errors) => IntentOutcome::ApplyFailedRollbackFailed {
             exec_errors,
             rollback_errors,
-        })
-    } else {
-        // Unexpected — surface raw to avoid swallowing errors silently.
-        Err(error_lines)
-    }
-}
-
-/// Builds the structured error lines returned by `approve_intent` on execution failure.
-///
-/// Format (lines):
-///   ROLLBACK:OK  or  ROLLBACK:FAILED       ← sentinel (first line, parsed by resolve_force_failure)
-///   <exec error lines>
-///   ---
-///   <rollback output or rollback error lines>
-///
-/// The sentinel + divider approach avoids a separate return type for approve_intent,
-/// keeping the CLI call site (`print_result(action, approve_intent(plan, approved))`) simple.
-fn build_rollback_error_lines(
-    plan_id: &str,
-    _plan_text: &[String],
-    exec_errors: Vec<String>,
-) -> Vec<String> {
-    match engine::rollback_plan(plan_id) {
-        Ok(rollback_text) => {
-            let mut lines = vec!["ROLLBACK:OK".to_string()];
-            lines.extend(exec_errors);
-            lines.push("---".to_string());
-            lines.extend(rollback_text);
-            lines
-        }
-        Err(rollback_errors) => {
-            let mut lines = vec!["ROLLBACK:FAILED".to_string()];
-            lines.extend(exec_errors);
-            lines.push("---".to_string());
-            lines.extend(rollback_errors);
-            lines
-        }
-    }
-}
-
-/// Splits a slice on the first `"---"` divider line.
-/// Returns (before_divider, after_divider). If no divider, everything goes to before.
-fn split_on_divider(lines: &[String]) -> (Vec<String>, Vec<String>) {
-    if let Some(pos) = lines.iter().position(|l| l == "---") {
-        (lines[..pos].to_vec(), lines[pos + 1..].to_vec())
-    } else {
-        (lines.to_vec(), vec![])
+        },
     }
 }
 
@@ -349,7 +281,7 @@ fn split_on_divider(lines: &[String]) -> (Vec<String>, Vec<String>) {
 ///
 /// The API never touches plan_store directly — that is a private engine
 /// implementation detail. Extracted as a helper to avoid repeating the
-/// map_err pattern for both Force and Normal paths.
+/// map_err pattern across run mode branches.
 fn save_plan(plan: &Plan) -> Result<(), Vec<String>> {
     engine::save_plan(plan).map_err(|e| vec![e])
 }

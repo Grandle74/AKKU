@@ -180,14 +180,12 @@ fn handle_outcome(action: &str, result: Result<IntentOutcome, Vec<String>>) {
 
 /// Renders an IntentOutcome variant to the terminal.
 ///
-/// Each variant maps to a distinct user experience:
-///   Immediate          → print output directly
-///   DryRun             → print the plan, no prompt
-///   RequiresApproval   → print plan, prompt user, execute Trip 2
-///   AutoApplied        → print plan + banner + result
-///   ApplyFailed        → print plan + banner + errors
-// In cli/src/main.rs — replace render_outcome entirely:
-
+/// Spacing rules:
+///   - One blank line before a plan block (it's the anchor of the output).
+///   - One blank line before the approval prompt.
+///   - One blank line before any status line (success, error, banner).
+///   - One blank line before a rollback block.
+///   - No trailing blank line — the REPL prompt provides natural separation.
 fn render_outcome(action: &str, outcome: IntentOutcome) {
     match outcome {
         IntentOutcome::Immediate(output) => {
@@ -195,10 +193,12 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
         }
 
         IntentOutcome::DryRun { plan_text } => {
+            println!();
             print_lines(&plan_text);
         }
 
         IntentOutcome::RequiresApproval { plan, plan_text } => {
+            println!();
             print_lines(&plan_text);
 
             print!("\nApply this plan? [y/N]: ");
@@ -208,56 +208,79 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
             io::stdin().read_line(&mut input).unwrap();
             let approved = matches!(input.trim().to_lowercase().as_str(), "y" | "yes");
 
-            // approve_intent handles auto-rollback internally on failure.
-            // The result lines already contain the rollback outcome narrative.
-            print_result(action, approve_intent(plan, approved));
+            // approve_intent handles auto-rollback on failure and returns a
+            // structured outcome — route it back through render_outcome.
+            match approve_intent(plan, approved) {
+                Ok(lines) => {
+                    println!();
+                    print_result(action, Ok(lines));
+                }
+                Err(outcome) => render_outcome(action, outcome),
+            }
         }
 
+        // ── Force path ────────────────────────────────────────────────────────
         IntentOutcome::Applied {
             plan_text,
             result_text,
         } => {
+            println!();
             print_lines(&plan_text);
             println!("\n⚡ --force: auto-approving plan.");
             print_result(action, Ok(result_text));
         }
 
-        IntentOutcome::ApplyFailedRolledBack {
+        // --force failed — snapshot saved, user can rollback via History.
+        IntentOutcome::ApplyFailed {
             plan_text,
+            exec_errors,
+        } => {
+            println!();
+            print_lines(&plan_text);
+            println!("\n⚡ --force: auto-approving plan.");
+            println!("✗ Error: Execution failed — snapshot saved for manual rollback.");
+            println!();
+            print_lines(&exec_errors);
+        }
+
+        // ── Normal path failures ──────────────────────────────────────────────
+        //
+        // No plan_text here — it was already printed before the approval prompt.
+        IntentOutcome::ApplyFailedRolledBack {
             exec_errors,
             rollback_text,
         } => {
-            print_lines(&plan_text);
-            println!("\n⚡ --force: auto-approving plan.");
-            println!("✗ Error: Execution failed — state restored.");
+            println!("\n✗ Error: Execution failed — state restored.");
+            println!();
             print_lines(&exec_errors);
-            println!("\n↩ Rollback steps applied:");
-            print_lines(&rollback_text);
+            println!();
+            print_rollback_plan(&rollback_text);
         }
 
         IntentOutcome::ApplyFailedRollbackFailed {
-            plan_text,
             exec_errors,
             rollback_errors,
         } => {
-            print_lines(&plan_text);
-            println!("\n⚡ --force: auto-approving plan.");
-            println!("✗ Error: Execution failed — rollback also failed. System state is unknown.");
+            println!(
+                "\n✗ Error: Execution failed — rollback also failed. System state is unknown."
+            );
             println!("\nExecution errors:");
+            println!();
             print_lines(&exec_errors);
             println!("\nRollback errors:");
+            println!();
             print_lines(&rollback_errors);
         }
 
-        // ── Manual rollback outcomes (rendered by History flow — not yet in CLI) ──
-        // These are wired and ready. The CLI will route here once `rollback_intent`
-        // is called from the History command.
+        // ── Manual rollback outcomes (History flow — not yet wired in CLI) ────
+        //
+        // This is the sole action for this path, so the full plan block is shown.
         IntentOutcome::RolledBack {
-            origin_plan_id,
+            origin_plan_id: _,
             rollback_text,
         } => {
-            println!("✔ Rolled back plan '{}'.", origin_plan_id);
-            print_lines(&rollback_text);
+            println!();
+            print_rollback_plan(&rollback_text);
         }
 
         IntentOutcome::RollbackFailed {
@@ -268,6 +291,7 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
                 "✗ Rollback of plan '{}' failed — system state may be inconsistent.",
                 origin_plan_id
             );
+            println!();
             print_lines(&errors);
         }
     }
@@ -299,6 +323,22 @@ fn print_result(action_str: &str, result: Result<Vec<String>, Vec<String>>) {
             print_lines(&errors);
         }
     }
+}
+
+/// Prints a rollback plan block with a balanced header/footer matching the
+/// style produced by the planner for normal plans.
+///
+/// Used for both auto-rollback (ApplyFailedRolledBack) and manual rollback
+/// (RolledBack). The steps are raw executor output lines — no target name is
+/// available at this point, so the header uses a fixed label.
+fn print_rollback_plan(steps: &[String]) {
+    let header = "=== Rollback Plan ===";
+    let footer = "=".repeat(header.len());
+    println!("{}", header);
+    for line in steps {
+        println!("  • {}", line);
+    }
+    println!("{}", footer);
 }
 
 fn print_lines(items: &[String]) {
