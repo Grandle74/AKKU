@@ -10,7 +10,8 @@
 //   5. Trigger auto-rollback when the user approves and execution fails (Normal path only).
 //   6. Expose rollback_intent for future manual rollback from the CLI History flow.
 //
-// The API does NOT execute systemctl commands and does NOT build Steps.
+// The API does NOT execute systemctl commands, does NOT build Steps,
+// and does NOT persist plans — the engine handles that in execute_order.
 // It also does NOT render output — that is the CLI's job.
 //
 // Rollback architecture:
@@ -108,6 +109,7 @@ pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<Strin
                 action,
                 target: None,
                 desired_properties: HashMap::new(),
+                mode: None,
             })?;
             Ok(result.output)
         }
@@ -133,6 +135,11 @@ pub fn process_tri_intent(
         action,
         target: Some(target),
         desired_properties: properties,
+        mode: match (is_config, mode) {
+            (true, RunMode::Normal) => Some("normal".to_string()),
+            (true, RunMode::Force) => Some("force".to_string()),
+            _ => None, // DryRun or non-Config: don't save
+        },
     })?;
 
     // Non-Config actions always execute immediately — the engine returns no plan.
@@ -241,7 +248,6 @@ fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome
         RunMode::DryRun => Ok(IntentOutcome::DryRun { plan_text }),
 
         RunMode::Force => {
-            save_plan(&plan)?;
             // No auto-rollback on --force. The snapshot is on disk; if execution
             // fails, the user decides what to do next via History.
             match engine_approve(plan, true) {
@@ -256,12 +262,7 @@ fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome
             }
         }
 
-        RunMode::Normal => {
-            // Save before returning to the frontend — guarantees an audit record
-            // exists even if the process is killed during the approval window.
-            save_plan(&plan)?;
-            Ok(IntentOutcome::RequiresApproval { plan, plan_text })
-        }
+        RunMode::Normal => Ok(IntentOutcome::RequiresApproval { plan, plan_text }),
     }
 }
 
@@ -282,15 +283,6 @@ fn build_rollback_outcome(plan_id: &str, exec_errors: Vec<String>) -> IntentOutc
             rollback_errors,
         },
     }
-}
-
-/// Persists the plan via the engine's public surface.
-///
-/// The API never touches plan_store directly — that is a private engine
-/// implementation detail. Extracted as a helper to avoid repeating the
-/// map_err pattern across run mode branches.
-fn save_plan(plan: &Plan) -> Result<(), Vec<String>> {
-    engine::save_plan(plan).map_err(|e| vec![e])
 }
 
 fn validate_conflicts(

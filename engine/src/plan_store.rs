@@ -67,6 +67,11 @@ pub fn save(plan: &Plan) -> Result<(), String> {
         data["rollback_of"] = serde_json::json!(origin_id);
     }
 
+    // Mode is always present for plans created via the API (normal/force/rollback).
+    if let Some(mode) = &plan.mode {
+        data["mode"] = serde_json::json!(mode);
+    }
+
     fs::write(
         plan_path(&plan.id),
         serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?,

@@ -66,6 +66,7 @@ impl Snapshot {
             action: Action::Config,
             target: Some(self.target),
             desired_properties: properties,
+            mode: None, // rollback path stamps mode directly before calling plan_store::save
         })
     }
 }

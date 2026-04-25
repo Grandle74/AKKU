@@ -23,12 +23,6 @@ pub use module_resolver::ModuleId;
 pub use planner::Plan;
 mod snapshot;
 
-/// Public wrapper so the API layer can persist a plan without importing
-/// plan_store directly. plan_store stays a private engine implementation detail.
-pub fn save_plan(plan: &Plan) -> Result<(), String> {
-    plan_store::save(plan)
-}
-
 // ── Core Types ────────────────────────────────────────────────────────────────
 
 /// Describes an operation to perform, as assembled by the API from parsed intent.
@@ -40,6 +34,8 @@ pub struct Order {
     pub target: Option<String>,
     /// Non-empty only for Config actions. Ignored by Meta/Custom dispatchers.
     pub desired_properties: HashMap<String, PropertyValue>,
+    /// Set by the API to "normal", "force", or "rollback". None means dry-run — do not save.
+    pub mode: Option<String>,
 }
 
 /// Returned by `execute_order` for every action.
@@ -80,7 +76,12 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
                         pending_plan: None,
                     })
                 }
-                Some(plan) => {
+                Some(mut plan) => {
+                    // Save to disk when a mode is set. None means dry-run — no audit record.
+                    if let Some(ref mode) = order.mode {
+                        plan.mode = Some(mode.clone());
+                        plan_store::save(&plan).map_err(|e| vec![e])?;
+                    }
                     // Hand the plan's display lines to the frontend as-is.
                     // The frontend decides how to render them.
                     let output = plan.output.clone();
@@ -109,8 +110,7 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
 ///
 /// Takes the in-memory Plan that was returned from `execute_order` —
 /// no file reload is needed for execution. The plan file (written by
-/// `engine::save_plan` in the API layer before this is called) is only
-/// updated here for audit-trail purposes.
+/// `execute_order` before returning) is only updated here for audit-trail purposes.
 pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<String>> {
     if !approved {
         let _ = plan_store::update_status(&plan.id, "rejected");
@@ -165,7 +165,8 @@ pub fn preview_rollback_plan(origin_plan_id: &str) -> Result<Plan, Vec<String>> 
     };
 
     plan.rollback_of = Some(origin_plan_id.to_string());
-    save_plan(&plan).map_err(|e| vec![e])?;
+    plan.mode = Some("rollback".to_string());
+    plan_store::save(&plan).map_err(|e| vec![e])?;
 
     Ok(plan)
 }

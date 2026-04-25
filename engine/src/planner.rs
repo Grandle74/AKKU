@@ -33,6 +33,10 @@ pub struct Plan {
     pub steps: Steps,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rollback_of: Option<String>,
+    /// Execution mode recorded for the audit trail: "normal", "force", or "rollback".
+    /// Set by the API layer before saving; None on freshly planned in-memory plans.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 // ── ID Generation ─────────────────────────────────────────────────────────────
@@ -99,6 +103,7 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
         output,
         steps,
         rollback_of: None,
+        mode: None,
     }))
 }
 
