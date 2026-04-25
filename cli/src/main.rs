@@ -24,6 +24,8 @@ use rustyline::error::ReadlineError;
 use std::collections::HashMap;
 use std::io::{self, Write};
 
+mod history;
+
 fn main() {
     println!("Welcome to YaST3 (prototype)!");
     println!(
@@ -50,6 +52,7 @@ fn main() {
 
                 match parts[0].as_str() {
                     "help" => show_help(),
+                    "history" => history::show_history(),
                     "exit" | "quit" => {
                         println!("Exiting...");
                         break 'repl;
