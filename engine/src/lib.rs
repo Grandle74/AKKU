@@ -145,12 +145,13 @@ pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<Strin
 
 // ── Direct Trip (Rollback) ─────────────────────────────────────────────────────────
 
-/// Restores a target to its pre-execution state by loading the snapshot
-/// captured before the original plan ran.
+/// Generates a rollback plan from a snapshot and saves it to disk,
+/// but does NOT execute it.
 ///
-/// Executes immediately without user approval — mirrors --force behavior.
-/// No snapshot is taken before this execution (rollback_of is Some).
-pub fn rollback_plan(origin_plan_id: &str) -> Result<Vec<String>, Vec<String>> {
+/// Called by the History TUI to show the user what will be restored
+/// before they confirm. The returned Plan is passed to `approve_plan`
+/// on the user's second Enter.
+pub fn preview_rollback_plan(origin_plan_id: &str) -> Result<Plan, Vec<String>> {
     let snapshot = snapshot::load(origin_plan_id).map_err(|e| vec![e])?;
     let order = snapshot.to_order().map_err(|e| vec![e])?;
 
@@ -158,14 +159,25 @@ pub fn rollback_plan(origin_plan_id: &str) -> Result<Vec<String>, Vec<String>> {
     let maybe_plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
 
     let Some(mut plan) = maybe_plan else {
-        return Ok(vec![
+        return Err(vec![
             "Target is already at the pre-execution state — nothing to restore.".to_string(),
         ]);
     };
 
     plan.rollback_of = Some(origin_plan_id.to_string());
-
     save_plan(&plan).map_err(|e| vec![e])?;
 
+    Ok(plan)
+}
+
+/// Restores a target to its pre-execution state by loading the snapshot
+/// captured before the original plan ran.
+///
+/// Executes immediately without user approval — mirrors --force behavior.
+/// No snapshot is taken before this execution (rollback_of is Some).
+/// Used by the auto-rollback path only — the History TUI uses
+/// preview_rollback_plan + approve_plan instead.
+pub fn rollback_plan(origin_plan_id: &str) -> Result<Vec<String>, Vec<String>> {
+    let plan = preview_rollback_plan(origin_plan_id)?;
     approve_plan(plan, true)
 }

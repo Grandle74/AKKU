@@ -187,6 +187,15 @@ pub fn rollback_intent(origin_plan_id: &str) -> IntentOutcome {
     }
 }
 
+/// Preview-only rollback: generates and saves the rollback plan without executing it.
+///
+/// Called by the History TUI on the first Enter. The returned Plan is displayed
+/// to the user in the popup, then passed to `approve_intent` on confirmation.
+/// This gives the user a chance to see exactly what will be restored before committing.
+pub fn preview_rollback_intent(origin_plan_id: &str) -> Result<Plan, Vec<String>> {
+    engine::preview_rollback_plan(origin_plan_id)
+}
+
 // ── Internal Helpers ──────────────────────────────────────────────────────────
 
 /// Validates the request at the API boundary: known domain, legal action for

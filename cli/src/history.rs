@@ -17,22 +17,28 @@
 //   - Read plan files from disk (read-only — never writes).
 //   - Render the split-pane TUI via crossterm.
 //   - Warn before rollback if newer completed plans touched the same target.
-//   - Route confirmed rollbacks through `api::rollback_intent`.
+//   - Generate a rollback plan preview via `api::preview_rollback_intent`
+//     (first Enter), then execute it via `api::approve_intent` (second Enter).
+//
+// Rollback is a two-step flow in the TUI:
+//   1. First Enter  → preview_rollback_intent: generates + saves the rollback plan.
+//                     The popup shows its steps (the restoration, not the failure).
+//   2. Second Enter → approve_intent(plan, true): executes the saved plan.
+//      Esc           → cancels, discards the pending plan.
 //
 // This module has zero rollback logic of its own — it is display and
 // routing only. All state transitions live in the API and engine layers.
 
-use api::rollback_intent;
+use api::{IntentOutcome, Plan, approve_intent, preview_rollback_intent};
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, Event, KeyCode, KeyModifiers},
     execute, queue,
     style::{self, Color, Print, ResetColor, SetForegroundColor},
     terminal::{self, ClearType},
 };
 use serde::Deserialize;
 use std::{
-    collections::HashMap,
     fs,
     io::{self, Write},
     path::PathBuf,
@@ -41,11 +47,14 @@ use std::{
 // ── Plan file schema (read-only mirror of plan_store's format) ────────────────
 
 /// A step as recorded in the plan file.
+/// `status` is written by the executor after each step runs —
+/// absent on pending plans, present once execution begins.
 #[derive(Deserialize)]
 struct StoredStep {
     action: String,
     target: String,
     description: String,
+    status: Option<String>,
 }
 
 /// A plan file as written by plan_store — only the fields history needs.
@@ -56,9 +65,17 @@ struct StoredPlan {
     status: String,
     steps: Vec<StoredStep>,
     rollback_of: Option<String>,
+    mode: Option<String>,
 }
 
 // ── Display model ─────────────────────────────────────────────────────────────
+
+/// A single step as carried by the display model.
+/// Keeps description and per-step execution status together for rendering.
+struct StepEntry {
+    description: String,
+    status: Option<String>,
+}
 
 /// Everything the TUI needs to render one row in the list pane and the
 /// full detail pane. Built once at load time from the raw StoredPlan.
@@ -70,10 +87,12 @@ struct PlanEntry {
     date: String,
     /// One-line action summary for the list pane.
     summary: String,
-    /// Full step descriptions for the detail pane.
-    steps: Vec<String>,
+    /// Steps with per-step execution status for the detail pane.
+    steps: Vec<StepEntry>,
     /// Present when this plan was itself a rollback of another plan.
     rollback_of: Option<String>,
+    /// Run mode recorded by the API when the plan was saved.
+    mode: Option<String>,
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────
@@ -112,8 +131,11 @@ struct TuiState {
     selected: usize,
     /// Feedback line shown at the bottom after an action (rollback result, warning).
     message: Option<String>,
-    /// True when a rollback warning is pending and the next keypress is a confirm.
-    awaiting_confirm: bool,
+    /// True when the rollback preview popup is open and the next Enter fires.
+    showing_popup: bool,
+    /// The generated rollback plan shown in the popup, awaiting user confirmation.
+    /// Set when showing_popup becomes true; consumed (and cleared) on confirmation.
+    pending_rollback_plan: Option<Plan>,
 }
 
 fn run_tui(entries: Vec<PlanEntry>) -> Result<(), String> {
@@ -126,14 +148,23 @@ fn run_tui(entries: Vec<PlanEntry>) -> Result<(), String> {
         entries,
         selected: 0,
         message: None,
-        awaiting_confirm: false,
+        showing_popup: false,
+        pending_rollback_plan: None,
     };
 
     // Initial draw before waiting for the first keypress.
     draw(&mut stdout, &state)?;
 
     loop {
-        let event = event::read().map_err(|e| e.to_string())?;
+        let event = match event::read() {
+            Ok(e) => e,
+            Err(_) => {
+                // Transient read errors (e.g. SIGWINCH noise) — attempt a redraw
+                // and continue rather than crashing out of the TUI.
+                let _ = draw(&mut stdout, &state);
+                continue;
+            }
+        };
 
         if let Event::Key(key) = event {
             // Ctrl-C exits unconditionally — even mid-confirm.
@@ -143,29 +174,29 @@ fn run_tui(entries: Vec<PlanEntry>) -> Result<(), String> {
 
             match key.code {
                 KeyCode::Esc => {
-                    if state.awaiting_confirm {
-                        // Cancel the pending rollback rather than exiting.
-                        state.awaiting_confirm = false;
+                    if state.showing_popup {
+                        // Dismiss the popup rather than exiting.
+                        state.showing_popup = false;
+                        state.pending_rollback_plan = None;
                         state.message = Some("Rollback cancelled.".into());
                     } else {
                         break;
                     }
                 }
 
-                KeyCode::Up => {
+                // Navigation is blocked while the popup is open — it is modal.
+                KeyCode::Up if !state.showing_popup => {
                     if state.selected > 0 {
                         state.selected -= 1;
                         // Clear feedback when moving — it belongs to the old selection.
                         state.message = None;
-                        state.awaiting_confirm = false;
                     }
                 }
 
-                KeyCode::Down => {
+                KeyCode::Down if !state.showing_popup => {
                     if state.selected + 1 < state.entries.len() {
                         state.selected += 1;
                         state.message = None;
-                        state.awaiting_confirm = false;
                     }
                 }
 
@@ -175,13 +206,9 @@ fn run_tui(entries: Vec<PlanEntry>) -> Result<(), String> {
             }
 
             draw(&mut stdout, &state)?;
-
-            // After a completed rollback (non-confirm Enter on a done action),
-            // the message is set and awaiting_confirm is false — we stay open
-            // so the user can see the result and press Esc to exit.
         }
 
-        // Resize: just redraw.
+        // Resize: redraw, or show the too-small message — draw() handles both.
         if let Event::Resize(_, _) = event {
             draw(&mut stdout, &state)?;
         }
@@ -193,33 +220,70 @@ fn run_tui(entries: Vec<PlanEntry>) -> Result<(), String> {
     Ok(())
 }
 
-/// Handles an Enter keypress: first press warns (if needed) and arms the
-/// confirm flag; second press fires the rollback.
+/// Handles an Enter keypress.
+///
+/// First Enter: call `preview_rollback_intent` to generate (and save) the
+/// rollback plan, then open the popup showing its steps — NOT the failed plan.
+/// Second Enter (popup open): fire `approve_intent` with the stored plan.
+///
+/// After a successful rollback the entries are reloaded from disk so the
+/// new rollback plan appears in the list without requiring a TUI restart.
 fn handle_enter(state: &mut TuiState) {
     let entry = &state.entries[state.selected];
 
-    // Only pending or failed plans can be rolled back.
-    // Completed plans whose execution succeeded have a snapshot and are valid targets.
-    // Rejected plans never executed — nothing to restore.
-    if matches!(entry.status.as_str(), "rejected" | "executing") {
+    // Only completed or failed plans with a snapshot can be rolled back.
+    // Rejected plans never executed. Executing plans are mid-flight.
+    if matches!(entry.status.as_str(), "rejected" | "executing" | "pending") {
         state.message = Some(format!("Cannot rollback a '{}' plan.", entry.status));
         return;
     }
 
-    if state.awaiting_confirm {
-        // Second Enter — fire.
-        state.awaiting_confirm = false;
-        let plan_id = entry.id.clone();
-        let outcome = rollback_intent(&plan_id);
-        state.message = Some(format_rollback_result(outcome));
-    } else {
-        // First Enter — arm, with optional conflict warning.
-        let warn = conflict_warning(&state.entries, state.selected);
-        state.awaiting_confirm = true;
-        state.message = Some(match warn {
-            Some(w) => format!("⚠  {}  —  Enter to confirm, Esc to cancel.", w),
-            None => "Press Enter again to confirm rollback, Esc to cancel.".into(),
+    if state.showing_popup {
+        // Second Enter — execute the already-generated rollback plan.
+        state.showing_popup = false;
+
+        let plan = match state.pending_rollback_plan.take() {
+            Some(p) => p,
+            None => {
+                state.message = Some("✗ No rollback plan ready — try again.".into());
+                return;
+            }
+        };
+
+        let result = approve_intent(plan, true);
+        state.message = Some(match result {
+            Ok(_) => "✔ Rollback applied — press Esc to exit and see details.".into(),
+            Err(outcome) => format_rollback_result(outcome),
         });
+
+        // Reload entries so the new rollback plan appears in the list.
+        if let Ok(fresh) = load_entries() {
+            // Keep selection clamped within the new entry count.
+            if state.selected >= fresh.len() {
+                state.selected = fresh.len().saturating_sub(1);
+            }
+            state.entries = fresh;
+        }
+    } else {
+        // First Enter — generate the rollback plan and open the preview popup.
+        let plan_id = entry.id.clone();
+
+        match preview_rollback_intent(&plan_id) {
+            Ok(plan) => {
+                state.pending_rollback_plan = Some(plan);
+                state.showing_popup = true;
+                state.message = None;
+            }
+            Err(errors) => {
+                state.message = Some(format!(
+                    "✗ {}",
+                    errors
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Preview failed.".into())
+                ));
+            }
+        }
     }
 }
 
@@ -230,12 +294,26 @@ fn draw(stdout: &mut impl Write, state: &TuiState) -> Result<(), String> {
     let cols = cols as usize;
     let rows = rows as usize;
 
-    // Reserve: 1 header + 1 divider + 1 footer + 1 message = 4 fixed rows.
-    // Everything in between is list/detail content.
+    // Guard: terminal too small to render anything useful.
+    // Handles the window-too-small case cleanly instead of panicking on underflows.
+    if cols < 50 || rows < 8 {
+        queue!(
+            stdout,
+            cursor::MoveTo(0, 0),
+            terminal::Clear(ClearType::All),
+            SetForegroundColor(Color::Yellow),
+            Print("  ↔  Please resize your terminal"),
+            ResetColor
+        )
+        .map_err(|e| e.to_string())?;
+        return stdout.flush().map_err(|e| e.to_string());
+    }
+
+    // Reserve: 1 header + 1 column-label row + 1 footer + 1 message = 4 fixed rows.
     let content_rows = rows.saturating_sub(4);
 
     // Left pane is 1/3, right pane gets the rest. A '│' column sits between.
-    let left_width = (cols / 3).max(20);
+    let left_width = (cols / 3).max(22);
     let divider_col = left_width + 1;
     let right_width = cols.saturating_sub(divider_col + 1);
 
@@ -256,6 +334,11 @@ fn draw(stdout: &mut impl Write, state: &TuiState) -> Result<(), String> {
         right_width,
     )?;
     draw_footer(stdout, rows, cols, state)?;
+
+    // Popup is drawn last so it layers on top of everything else.
+    if state.showing_popup {
+        draw_popup(stdout, state, cols, rows)?;
+    }
 
     stdout.flush().map_err(|e| e.to_string())
 }
@@ -342,7 +425,7 @@ fn draw_column_labels(
     divider_col: usize,
     right_width: usize,
 ) -> Result<(), String> {
-    let left_label = truncate("  # Date       Target          Status", left_width);
+    let left_label = truncate("  # Date       Target        Status     Mod", left_width);
     let right_label = "  Detail";
 
     queue!(
@@ -368,13 +451,19 @@ fn draw_list_row(
     let status_color = status_color(&entry.status);
     let num_col = " ";
     let date_col = &entry.date[..entry.date.len().min(10)];
+    let target_col = truncate(&entry.target, 12);
 
-    // Truncate target to keep the row from overflowing.
-    let target_col = truncate(&entry.target, 14);
+    // Single-letter abbreviation — compact enough to always fit the left pane.
+    let mode_col = match entry.mode.as_deref() {
+        Some("normal") => "N",
+        Some("force") => "F",
+        Some("rollback") => "R",
+        _ => "—",
+    };
 
     let row = format!(
-        "{} {}  {:<14}  {}",
-        num_col, date_col, target_col, &entry.status
+        "{} {}  {:<12}  {:<9}  {}",
+        num_col, date_col, target_col, &entry.status, mode_col
     );
     let row = truncate(&row, width.saturating_sub(2));
 
@@ -416,12 +505,18 @@ fn build_detail(state: &TuiState, width: usize) -> Vec<String> {
 
     lines.push(sep.clone());
 
-    // ── Steps ─────────────────────────────────────────────────────────────────
+    // ── Steps with per-step execution status ──────────────────────────────────
     if entry.steps.is_empty() {
         lines.push("  (no steps recorded)".into());
     } else {
         for step in &entry.steps {
-            lines.push(format!("  • {}", step));
+            // Status mark appended inline — visible without widening the pane.
+            let mark = match step.status.as_deref() {
+                Some("completed") => "  ✔",
+                Some("failed") => "  ✗",
+                _ => "",
+            };
+            lines.push(format!("  • {}{}", step.description, mark));
         }
     }
 
@@ -431,13 +526,120 @@ fn build_detail(state: &TuiState, width: usize) -> Vec<String> {
     lines
 }
 
+/// Draws the rollback preview popup — a floating box centered over the TUI.
+///
+/// Shows the GENERATED ROLLBACK PLAN steps (what will be restored to),
+/// NOT the original failed plan's steps. The plan was generated by
+/// `preview_rollback_intent` and stored in `state.pending_rollback_plan`.
+///
+/// The user reads what will be executed, then presses Enter to confirm
+/// or Esc to cancel. The conflict warning (if any) is embedded inside the popup.
+fn draw_popup(
+    stdout: &mut impl Write,
+    state: &TuiState,
+    cols: usize,
+    rows: usize,
+) -> Result<(), String> {
+    let entry = &state.entries[state.selected];
+    let inner_sep = "─".repeat(40);
+
+    let mut content: Vec<String> = Vec::new();
+    content.push(format!("Restoring  {}", entry.target));
+    content.push(inner_sep.clone());
+
+    // Show the rollback plan's steps — these are what will actually run.
+    match &state.pending_rollback_plan {
+        Some(plan) if !plan.steps.is_empty() => {
+            for step in &plan.steps {
+                content.push(format!("  • {}", step.description));
+            }
+        }
+        Some(_) => {
+            content.push("  (no steps — already at pre-execution state)".into());
+        }
+        None => {
+            content.push("  (rollback plan not available)".into());
+        }
+    }
+
+    content.push(inner_sep);
+
+    // Inline conflict warning so it can't be missed before confirming.
+    if let Some(warn) = conflict_warning(&state.entries, state.selected) {
+        content.push(format!("⚠  {}", warn));
+    }
+
+    content.push("Enter to confirm  ·  Esc to cancel".into());
+
+    // Size the box to the widest content line with 2-char side padding.
+    let inner_width = content
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(40)
+        .max(40);
+    let box_width = inner_width + 4; // 2 border chars + 2 padding chars per side
+    let box_height = content.len() + 2; // top border + content rows + bottom border
+
+    // Center the popup. Clamp to avoid drawing off-screen on small terminals.
+    let col = cols.saturating_sub(box_width) / 2;
+    let row = rows.saturating_sub(box_height) / 2;
+
+    // ── Top border ────────────────────────────────────────────────────────────
+    let title = " Restore Plan Preview ";
+    let fill = box_width.saturating_sub(title.len() + 3);
+    let top = format!("╭─{}{}╮", title, "─".repeat(fill));
+
+    queue!(
+        stdout,
+        cursor::MoveTo(col as u16, row as u16),
+        SetForegroundColor(Color::Cyan),
+        Print(&top),
+        ResetColor
+    )
+    .map_err(|e| e.to_string())?;
+
+    // ── Content rows ──────────────────────────────────────────────────────────
+    for (i, line) in content.iter().enumerate() {
+        // Color the warning and confirm hint so they stand out.
+        let color = if line.starts_with("⚠") {
+            Color::Yellow
+        } else if line.starts_with("Enter") {
+            Color::DarkGrey
+        } else {
+            Color::Reset
+        };
+
+        let padded = format!("│  {:<width$}  │", line, width = inner_width);
+        queue!(
+            stdout,
+            cursor::MoveTo(col as u16, (row + 1 + i) as u16),
+            SetForegroundColor(color),
+            Print(&padded),
+            ResetColor
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // ── Bottom border ─────────────────────────────────────────────────────────
+    let bottom = format!("╰{}╯", "─".repeat(box_width.saturating_sub(2)));
+    queue!(
+        stdout,
+        cursor::MoveTo(col as u16, (row + box_height - 1) as u16),
+        SetForegroundColor(Color::Cyan),
+        Print(&bottom),
+        ResetColor
+    )
+    .map_err(|e| e.to_string())
+}
+
 fn draw_footer(
     stdout: &mut impl Write,
     rows: usize,
     cols: usize,
     state: &TuiState,
 ) -> Result<(), String> {
-    let hint = if state.awaiting_confirm {
+    let hint = if state.showing_popup {
         "  Enter confirm  ·  Esc cancel"
     } else {
         "  ↑/↓ navigate  ·  Enter rollback  ·  Esc exit"
@@ -512,22 +714,25 @@ fn conflict_warning(entries: &[PlanEntry], selected: usize) -> Option<String> {
 
 // ── Rollback result rendering ─────────────────────────────────────────────────
 
-/// Converts an IntentOutcome from rollback_intent() into a one-line
-/// message for the TUI footer. Detailed output is not rendered inside
-/// the TUI — the user exits and the result is printed to the terminal.
-fn format_rollback_result(outcome: api::IntentOutcome) -> String {
+/// Converts an IntentOutcome from approve_intent() into a one-line
+/// message for the TUI footer.
+fn format_rollback_result(outcome: IntentOutcome) -> String {
     match outcome {
-        api::IntentOutcome::RolledBack { .. } => {
+        IntentOutcome::RolledBack { .. } => {
             "✔ Rollback applied — press Esc to exit and see details.".into()
         }
-        api::IntentOutcome::RollbackFailed { errors, .. } => {
+        IntentOutcome::RollbackFailed { errors, .. } => {
             format!(
                 "✗ Rollback failed — {}",
                 errors.first().cloned().unwrap_or_default()
             )
         }
-        // rollback_intent() only ever returns the two variants above.
-        // Any other variant here is a contract violation — surface it clearly.
+        IntentOutcome::ApplyFailedRolledBack { exec_errors, .. } => {
+            format!(
+                "✗ Execution failed — {}",
+                exec_errors.first().cloned().unwrap_or_default()
+            )
+        }
         _ => "✗ Unexpected outcome from rollback — check system state.".into(),
     }
 }
@@ -574,7 +779,14 @@ fn plans_dir() -> PathBuf {
 fn to_entry(p: StoredPlan) -> PlanEntry {
     let date = date_from_id(&p.id);
     let summary = build_summary(&p);
-    let steps = p.steps.iter().map(|s| s.description.clone()).collect();
+    let steps = p
+        .steps
+        .into_iter()
+        .map(|s| StepEntry {
+            description: s.description,
+            status: s.status,
+        })
+        .collect();
 
     PlanEntry {
         id: p.id,
@@ -584,6 +796,7 @@ fn to_entry(p: StoredPlan) -> PlanEntry {
         summary,
         steps,
         rollback_of: p.rollback_of,
+        mode: p.mode,
     }
 }
 
