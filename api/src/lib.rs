@@ -22,8 +22,8 @@
 //                     the user picks a plan from History. Not yet wired in the
 //                     CLI (History is not implemented), but the full path exists.
 
+pub use engine::PropertyValue;
 use engine::{Domain, Order, approve_plan as engine_approve, execute_order};
-pub use engine::{Plan, PropertyValue};
 use std::collections::HashMap;
 
 mod service_validator;
@@ -42,17 +42,17 @@ pub enum IntentOutcome {
     DryRun { plan_text: Vec<String> },
 
     /// Normal flow: plan saved, awaiting explicit user approval.
-    RequiresApproval { plan: Plan, plan_text: Vec<String> },
+    RequiresApproval { plan_id: String },
 
     /// Plan was approved (auto or manual) and executed successfully.
     Applied {
-        plan_text: Vec<String>,
+        plan_id: String,
         result_text: Vec<String>,
     },
 
     /// Execution failed. --force only — state left as-is for manual rollback.
     ApplyFailed {
-        plan_text: Vec<String>,
+        plan_id: String,
         exec_errors: Vec<String>,
     },
 
@@ -161,18 +161,13 @@ pub fn process_tri_intent(
 /// or Ok with "Plan rejected." on rejection (not an error — user chose this),
 /// or Err(IntentOutcome) on execution failure so the CLI can render the
 /// correct structured outcome without any string-parsing on its end.
-pub fn approve_intent(plan: Plan, approved: bool) -> Result<Vec<String>, Box<IntentOutcome>> {
+pub fn approve_intent(id: &str, approved: bool) -> Result<Vec<String>, Box<IntentOutcome>> {
     if !approved {
-        // engine_approve handles the plan_store status update for rejected plans.
-        // Rejection always returns Ok("Plan rejected.") — the unwrap is safe.
-        return Ok(engine_approve(plan, false).unwrap_or_else(|e| e));
+        return Ok(engine_approve(id, false).unwrap_or_else(|e| e));
     }
-
-    let plan_id = plan.id.clone();
-
-    match engine_approve(plan, true) {
+    match engine_approve(id, true) {
         Ok(output) => Ok(output),
-        Err(exec_errors) => Err(Box::new(build_rollback_outcome(&plan_id, exec_errors))),
+        Err(exec_errors) => Err(Box::new(build_rollback_outcome(id, exec_errors))),
     }
 }
 
@@ -199,8 +194,12 @@ pub fn rollback_intent(origin_plan_id: &str) -> IntentOutcome {
 /// Called by the History TUI on the first Enter. The returned Plan is displayed
 /// to the user in the popup, then passed to `approve_intent` on confirmation.
 /// This gives the user a chance to see exactly what will be restored before committing.
-pub fn preview_rollback_intent(origin_plan_id: &str) -> Result<Plan, Vec<String>> {
+pub fn preview_rollback_intent(origin_plan_id: &str) -> Result<(String, Vec<String>), Vec<String>> {
     engine::preview_rollback_plan(origin_plan_id)
+}
+
+pub fn read_plan(id: &str) -> Result<Vec<String>, String> {
+    engine::read_plan(id)
 }
 
 // ── Internal Helpers ──────────────────────────────────────────────────────────
@@ -240,29 +239,27 @@ fn resolve_outcome(result: EngineResult, mode: &RunMode) -> Result<IntentOutcome
     let plan_text = result.output;
 
     // Engine returned None: the service is already at desired state.
-    let Some(plan) = result.pending_plan else {
+    let Some(plan_id) = result.pending_plan else {
         return Ok(IntentOutcome::Immediate(plan_text));
     };
 
     match mode {
         RunMode::DryRun => Ok(IntentOutcome::DryRun { plan_text }),
 
-        RunMode::Force => {
-            // No auto-rollback on --force. The snapshot is on disk; if execution
-            // fails, the user decides what to do next via History.
-            match engine_approve(plan, true) {
-                Ok(result_text) => Ok(IntentOutcome::Applied {
-                    plan_text,
-                    result_text,
-                }),
-                Err(exec_errors) => Ok(IntentOutcome::ApplyFailed {
-                    plan_text,
-                    exec_errors,
-                }),
-            }
-        }
+        // No auto-rollback on --force. The snapshot is on disk; if execution
+        // fails, the user decides what to do next via History.
+        RunMode::Force => match engine_approve(&plan_id, true) {
+            Ok(result_text) => Ok(IntentOutcome::Applied {
+                plan_id,
+                result_text,
+            }),
+            Err(exec_errors) => Ok(IntentOutcome::ApplyFailed {
+                plan_id,
+                exec_errors,
+            }),
+        },
 
-        RunMode::Normal => Ok(IntentOutcome::RequiresApproval { plan, plan_text }),
+        RunMode::Normal => Ok(IntentOutcome::RequiresApproval { plan_id }),
     }
 }
 
