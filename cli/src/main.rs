@@ -220,7 +220,7 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
                     println!();
                     print_result(action, Ok(lines));
                 }
-                Err(outcome) => render_outcome(action, outcome),
+                Err(outcome) => render_outcome(action, *outcome),
             }
         }
 
@@ -317,7 +317,7 @@ fn print_result(action_str: &str, result: Result<Vec<String>, Vec<String>>) {
             if !action.is_informational() {
                 // Only prepend "✔ " if the output doesn't already carry one.
                 // Avoids double-prefixing from module-level success messages.
-                if !output.first().map_or(false, |s| s.starts_with('✔')) {
+                if !output.first().is_some_and(|s| s.starts_with('✔')) {
                     print!("✔ ");
                 }
             }

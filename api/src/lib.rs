@@ -161,7 +161,7 @@ pub fn process_tri_intent(
 /// or Ok with "Plan rejected." on rejection (not an error — user chose this),
 /// or Err(IntentOutcome) on execution failure so the CLI can render the
 /// correct structured outcome without any string-parsing on its end.
-pub fn approve_intent(plan: Plan, approved: bool) -> Result<Vec<String>, IntentOutcome> {
+pub fn approve_intent(plan: Plan, approved: bool) -> Result<Vec<String>, Box<IntentOutcome>> {
     if !approved {
         // engine_approve handles the plan_store status update for rejected plans.
         // Rejection always returns Ok("Plan rejected.") — the unwrap is safe.
@@ -172,7 +172,7 @@ pub fn approve_intent(plan: Plan, approved: bool) -> Result<Vec<String>, IntentO
 
     match engine_approve(plan, true) {
         Ok(output) => Ok(output),
-        Err(exec_errors) => Err(build_rollback_outcome(&plan_id, exec_errors)),
+        Err(exec_errors) => Err(Box::new(build_rollback_outcome(&plan_id, exec_errors))),
     }
 }
 

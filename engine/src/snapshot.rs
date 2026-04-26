@@ -25,6 +25,24 @@ pub struct Snapshot {
     pub state: serde_json::Value,
 }
 
+impl Snapshot {
+    /// Translates the captured state back into a Config Order.
+    ///
+    /// The returned Order expresses "make the target look like it did before"
+    /// as a declarative property map — feeding it straight into the planner
+    /// produces the correct restoration steps without any special-casing.
+    pub fn into_order(self) -> Result<Order, String> {
+        let properties = to_properties(&self.domain, &self.state)?;
+        Ok(Order {
+            domain: self.domain,
+            action: Action::Config,
+            target: Some(self.target),
+            desired_properties: properties,
+            mode: None, // rollback path stamps mode directly before calling plan_store::save
+        })
+    }
+}
+
 /// Captures the target's live state and writes it to disk.
 ///
 /// Must succeed before execution begins — the caller marks the plan
@@ -51,24 +69,6 @@ pub fn load(plan_id: &str) -> Result<Snapshot, String> {
     let content = fs::read_to_string(snapshot_path(plan_id))
         .map_err(|_| format!("No snapshot found for plan '{}'", plan_id))?;
     serde_json::from_str(&content).map_err(|e| e.to_string())
-}
-
-impl Snapshot {
-    /// Translates the captured state back into a Config Order.
-    ///
-    /// The returned Order expresses "make the target look like it did before"
-    /// as a declarative property map — feeding it straight into the planner
-    /// produces the correct restoration steps without any special-casing.
-    pub fn to_order(self) -> Result<Order, String> {
-        let properties = to_properties(&self.domain, &self.state)?;
-        Ok(Order {
-            domain: self.domain,
-            action: Action::Config,
-            target: Some(self.target),
-            desired_properties: properties,
-            mode: None, // rollback path stamps mode directly before calling plan_store::save
-        })
-    }
 }
 
 // ── Internal ──────────────────────────────────────────────────────────────────

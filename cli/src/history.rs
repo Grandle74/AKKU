@@ -269,7 +269,7 @@ fn handle_enter(state: &mut TuiState) {
         let result = approve_intent(plan, true);
         state.message = Some(match result {
             Ok(_) => "✔ Rollback applied — press Esc to exit and see details.".into(),
-            Err(outcome) => format_rollback_result(outcome),
+            Err(outcome) => format_rollback_result(*outcome),
         });
 
         // Reload entries so the new rollback plan appears in the list.
@@ -819,12 +819,7 @@ fn load_entries() -> Result<Vec<PlanEntry>, String> {
     let mut entries: Vec<PlanEntry> = fs::read_dir(&dir)
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|x| x.to_str())
-                .map_or(false, |x| x == "json")
-        })
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
         .filter_map(|e| {
             let content = fs::read_to_string(e.path()).ok()?;
             let stored: StoredPlan = serde_json::from_str(&content).ok()?;

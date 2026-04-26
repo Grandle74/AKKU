@@ -116,11 +116,11 @@ pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<Strin
     }
 
     // Rollback plans skip snapshot — restoring a broken state is meaningless.
-    if plan.rollback_of.is_none() {
-        if let Err(e) = snapshot::save(&plan.id, &plan.module_id.to_domain(), &plan.target) {
-            let _ = plan_store::update_status(&plan.id, "aborted");
-            return Err(vec![e]);
-        }
+    if plan.rollback_of.is_none()
+        && let Err(e) = snapshot::save(&plan.id, &plan.module_id.to_domain(), &plan.target)
+    {
+        let _ = plan_store::update_status(&plan.id, "aborted");
+        return Err(vec![e]);
     }
 
     // Mark as executing BEFORE the first step. If the process crashes mid-flight,
@@ -151,7 +151,7 @@ pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<Strin
 /// on the user's second Enter.
 pub fn preview_rollback_plan(origin_plan_id: &str) -> Result<Plan, Vec<String>> {
     let snapshot = snapshot::load(origin_plan_id).map_err(|e| vec![e])?;
-    let order = snapshot.to_order().map_err(|e| vec![e])?;
+    let order = snapshot.into_order().map_err(|e| vec![e])?;
 
     let module = module_resolver::ModuleId::resolve(&order.domain).map_err(|e| vec![e])?;
     let maybe_plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
