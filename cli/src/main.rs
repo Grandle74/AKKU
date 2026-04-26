@@ -213,15 +213,8 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
             io::stdin().read_line(&mut input).unwrap();
             let approved = matches!(input.trim().to_lowercase().as_str(), "y" | "yes");
 
-            // approve_intent handles auto-rollback on failure and returns a
-            // structured outcome — route it back through render_outcome.
-            match approve_intent(&plan_id, approved) {
-                Ok(lines) => {
-                    println!();
-                    print_result(action, Ok(lines));
-                }
-                Err(outcome) => render_outcome(action, *outcome),
-            }
+            println!();
+            render_outcome(action, approve_intent(&plan_id, approved));
         }
 
         // ── Force path ────────────────────────────────────────────────────────

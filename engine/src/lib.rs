@@ -157,9 +157,7 @@ pub fn preview_rollback_plan(origin_plan_id: &str) -> Result<(String, Vec<String
     let maybe_plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
 
     let Some(mut plan) = maybe_plan else {
-        return Err(vec![
-            "Target is already at the pre-execution state — nothing to restore.".to_string(),
-        ]);
+        return Ok((String::new(), vec![]));
     };
 
     plan.rollback_of = Some(origin_plan_id.to_string());
@@ -177,11 +175,6 @@ pub fn preview_rollback_plan(origin_plan_id: &str) -> Result<(String, Vec<String
 /// No snapshot is taken before this execution (rollback_of is Some).
 /// Used by the auto-rollback path only — the History TUI uses
 /// preview_rollback_plan + approve_plan instead.
-pub fn rollback_plan(origin_plan_id: &str) -> Result<Vec<String>, Vec<String>> {
-    let (plan_id, _) = preview_rollback_plan(origin_plan_id)?;
-    approve_plan(&plan_id, true)
-}
-
 pub fn read_plan(id: &str) -> Result<Vec<String>, String> {
     plan_store::read(id)
 }

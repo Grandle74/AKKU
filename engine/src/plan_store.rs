@@ -60,24 +60,8 @@ pub(crate) fn load(id: &str) -> Result<Plan, String> {
 
 /// Builds display lines from a saved plan — used by frontends via api::read_plan.
 pub(crate) fn read(id: &str) -> Result<Vec<String>, String> {
-    let content =
-        fs::read_to_string(plan_path(id)).map_err(|_| format!("No plan found for id '{}'", id))?;
-    let data: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-
-    let target = data["target"].as_str().unwrap_or("?");
-    let header = format!("=== Plan for '{}' ===", target);
-    let footer = "=".repeat(header.len());
-
-    let mut lines = vec![header];
-    if let Some(steps) = data["steps"].as_array() {
-        for step in steps {
-            if let Some(desc) = step["description"].as_str() {
-                lines.push(format!("  • {}", desc));
-            }
-        }
-    }
-    lines.push(footer);
-    Ok(lines)
+    let plan = load(id)?;
+    Ok(plan.output)
 }
 
 /// Transitions the plan's recorded status field.

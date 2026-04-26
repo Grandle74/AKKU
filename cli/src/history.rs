@@ -29,7 +29,7 @@
 // This module has zero rollback logic of its own — it is display and
 // routing only. All state transitions live in the API and engine layers.
 
-use api::{approve_intent, preview_rollback_intent};
+use api::{IntentOutcome, approve_intent, preview_rollback_intent};
 
 use crossterm::{
     cursor,
@@ -266,11 +266,23 @@ fn handle_enter(state: &mut TuiState) {
         };
 
         match approve_intent(&plan_id, true) {
-            Ok(_) => {
+            IntentOutcome::Immediate(lines) => {
+                state.message = Some(lines.first().cloned().unwrap_or_else(|| "✔ Done.".into()));
+            }
+            IntentOutcome::RolledBack { .. } => {
                 state.message = Some("✔ Rollback applied.".into());
             }
-            Err(_) => {
-                state.message = Some("✗ Rollback failed — check system state.".into());
+            IntentOutcome::RollbackFailed { errors, .. } => {
+                state.message = Some(format!(
+                    "✗ {}",
+                    errors
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Rollback failed.".into())
+                ));
+            }
+            _ => {
+                state.message = Some("✗ Unexpected outcome — check system state.".into());
             }
         }
 
@@ -285,6 +297,10 @@ fn handle_enter(state: &mut TuiState) {
         let plan_id = entry.id.clone();
 
         match preview_rollback_intent(&plan_id) {
+            Ok((plan_id, _)) if plan_id.is_empty() => {
+                state.message =
+                    Some("✔ Already at pre-execution state — nothing to restore.".into());
+            }
             Ok((plan_id, descriptions)) => {
                 state.pending_rollback_plan = Some((plan_id, descriptions));
                 state.showing_popup = true;
@@ -478,7 +494,7 @@ fn draw_list_row(
     };
 
     let row = format!(
-        "{} {}  {:<12}  {:<9}  {}",
+        "{} {}  {:<12}  {:<9}  {:<8}",
         num_col, date_col, target_col, &entry.status, mode_col
     );
     let row = truncate(&row, width.saturating_sub(2));

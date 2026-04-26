@@ -161,31 +161,14 @@ pub fn process_tri_intent(
 /// or Ok with "Plan rejected." on rejection (not an error — user chose this),
 /// or Err(IntentOutcome) on execution failure so the CLI can render the
 /// correct structured outcome without any string-parsing on its end.
-pub fn approve_intent(id: &str, approved: bool) -> Result<Vec<String>, Box<IntentOutcome>> {
+pub fn approve_intent(id: &str, approved: bool) -> IntentOutcome {
     if !approved {
-        return Ok(engine_approve(id, false).unwrap_or_else(|e| e));
+        let _ = engine_approve(id, false);
+        return IntentOutcome::Immediate(vec!["Plan rejected.".to_string()]);
     }
     match engine_approve(id, true) {
-        Ok(output) => Ok(output),
-        Err(exec_errors) => Err(Box::new(build_rollback_outcome(id, exec_errors))),
-    }
-}
-
-/// Manual rollback entry point: restores a target to its pre-execution state
-/// using the snapshot captured before the original plan ran.
-///
-/// Called by the CLI History flow once implemented — NOT called during normal
-/// approve/execute cycles. The plan_id comes from the user selecting a past plan.
-pub fn rollback_intent(origin_plan_id: &str) -> IntentOutcome {
-    match engine::rollback_plan(origin_plan_id) {
-        Ok(rollback_text) => IntentOutcome::RolledBack {
-            origin_plan_id: origin_plan_id.to_string(),
-            rollback_text,
-        },
-        Err(errors) => IntentOutcome::RollbackFailed {
-            origin_plan_id: origin_plan_id.to_string(),
-            errors,
-        },
+        Ok(output) => IntentOutcome::Immediate(output),
+        Err(exec_errors) => build_rollback_outcome(id, exec_errors),
     }
 }
 
@@ -270,7 +253,7 @@ fn resolve_outcome(result: EngineResult, mode: &RunMode) -> Result<IntentOutcome
 /// plan_text is intentionally NOT threaded through — the CLI already rendered
 /// the plan before the approval prompt, so including it would cause a double-print.
 fn build_rollback_outcome(plan_id: &str, exec_errors: Vec<String>) -> IntentOutcome {
-    match engine::rollback_plan(plan_id) {
+    match engine_approve(&plan_id, true) {
         Ok(rollback_text) => IntentOutcome::ApplyFailedRolledBack {
             exec_errors,
             rollback_text,

@@ -28,7 +28,6 @@ pub struct Plan {
     pub id: String,
     pub(crate) module_id: ModuleId,
     pub target: String,
-    #[serde(skip)]
     pub output: Vec<String>,
     pub steps: Steps,
     /// Execution mode recorded for the audit trail: "normal", "force", or "rollback".
