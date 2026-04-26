@@ -40,7 +40,7 @@ fn plan_path(id: &str) -> PathBuf {
 ///
 /// `output` is never written to the file; it is session display text only.
 /// Steps are written in a flat format for readability and future tooling.
-pub fn save(plan: &Plan) -> Result<(), String> {
+pub(crate) fn save(plan: &Plan) -> Result<(), String> {
     fs::create_dir_all(plans_dir()).map_err(|e| e.to_string())?;
 
     let steps: Vec<serde_json::Value> = plan
@@ -86,7 +86,7 @@ pub fn save(plan: &Plan) -> Result<(), String> {
 /// Reading and rewriting the whole file is intentional — it keeps the file
 /// as a self-contained JSON document rather than a line-appended log,
 /// which makes it trivially readable by humans and future tooling.
-pub fn update_status(id: &str, status: &str) -> Result<(), String> {
+pub(crate) fn update_status(id: &str, status: &str) -> Result<(), String> {
     let content = fs::read_to_string(plan_path(id)).map_err(|e| e.to_string())?;
     let mut data: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
 
@@ -102,7 +102,7 @@ pub fn update_status(id: &str, status: &str) -> Result<(), String> {
 /// Updates the status of a single step by index.
 /// Also adds the result output for each step.
 /// Called by the executor after each step completes or fails.
-pub fn update_step_status(
+pub(crate) fn update_step_status(
     id: &str,
     step_index: usize,
     status: &str,

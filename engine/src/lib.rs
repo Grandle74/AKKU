@@ -15,13 +15,11 @@ pub use shared_libs::{Action, Domain, PropertyValue};
 use std::collections::HashMap;
 
 mod executor;
-pub mod module_resolver;
+mod module_resolver;
 mod plan_store;
 mod planner;
-
-pub use module_resolver::ModuleId;
-pub use planner::Plan;
 mod snapshot;
+pub use planner::Plan;
 
 // ── Core Types ────────────────────────────────────────────────────────────────
 

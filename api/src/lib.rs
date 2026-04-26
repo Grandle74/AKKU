@@ -29,7 +29,7 @@ use std::collections::HashMap;
 mod service_validator;
 
 pub use engine::Action;
-pub use engine::EngineResult as IntentResult;
+use engine::EngineResult;
 
 // ── Public Types ──────────────────────────────────────────────────────────────
 
@@ -236,7 +236,7 @@ fn validate_request(
 ///
 /// Called only for Config actions. By the time we reach here, the engine has
 /// already confirmed there is work to do (plan is Some) or not (plan is None).
-fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome, Vec<String>> {
+fn resolve_outcome(result: EngineResult, mode: &RunMode) -> Result<IntentOutcome, Vec<String>> {
     let plan_text = result.output;
 
     // Engine returned None: the service is already at desired state.

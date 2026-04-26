@@ -26,17 +26,17 @@ use std::collections::HashMap;
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Plan {
     pub id: String,
-    pub module_id: ModuleId,
+    pub(crate) module_id: ModuleId,
     pub target: String,
     #[serde(skip)]
     pub output: Vec<String>,
     pub steps: Steps,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rollback_of: Option<String>,
     /// Execution mode recorded for the audit trail: "normal", "force", or "rollback".
     /// Set by the API layer before saving; None on freshly planned in-memory plans.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<String>,
+    pub(crate) mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) rollback_of: Option<String>,
 }
 
 // ── ID Generation ─────────────────────────────────────────────────────────────
