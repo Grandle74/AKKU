@@ -1,6 +1,6 @@
 // cli/src/main.rs
 //
-// commando — the developer/tester reference CLI for YaST3.
+// commando — the developer/tester reference CLI for AKKU.
 //
 // This is NOT a consumer-facing tool. It is a reference implementation
 // that demonstrates how a frontend should call the API layer. Future
@@ -25,9 +25,9 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 
 fn main() {
-    println!("Welcome to YaST3 (prototype)!");
+    println!("Welcome to AKKU (prototype)!");
     println!(
-        "This is a prototype of YaST3, a system configuration tool.\n{}",
+        "This is a prototype of AKKU, a system configuration tool.\n{}",
         "─".repeat(62)
     );
     println!("Enter \"help\" for commands list\n");

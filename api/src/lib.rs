@@ -1,6 +1,6 @@
 // api/src/lib.rs
 //
-// The API layer: the single entry point from the CLI into YaST3.
+// The API layer: the single entry point from the CLI into AKKU.
 //
 // Responsibilities:
 //   1. Parse and validate the request (domain, action, properties) — reject early.
