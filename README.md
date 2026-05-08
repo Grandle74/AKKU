@@ -3,12 +3,12 @@
 <img src="icon.png" alt="AKKU" width="120"/>
 
 # AKKU
- 
+ Another Konfig & Kontrol Utility
 > Declarative system configuration — plan, apply, and rollback across any OS and init system.
  
-![Status](https://img.shields.io/badge/status-pre--release-blue)
+![Status](https://img.shields.io/badge/status-prototype-blue)
 ![License](https://img.shields.io/badge/license-LGPL--3.0-blue)
-![Rust](https://img.shields.io/badge/rust-1.89.0-orange?logo=rust)
+![Rust](https://img.shields.io/badge/rust-1.89.0+-orange?logo=rust)
  
 </div>
 
