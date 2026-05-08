@@ -1,3 +1,24 @@
+# --- Rust / Cargo ---
 /target/
-*.rs.bk
+**/*.rs.bk
+
+# --- Security (The "Never Push" List) ---
+.env
+.env.*
+*.pem
+*.key
+*.secret
+auth.json
+
+# --- OS / IDE Junk ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+
+# --- Logs & Temp ---
 *.log
+tmp/
+temp/
