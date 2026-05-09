@@ -299,7 +299,7 @@ fn parse_flags(input: &str) -> (Vec<String>, RunMode) {
 
 // ── Help ──────────────────────────────────────────────────────────────────────
 
-const CLI_HELP: &str = include_str!("../doc/help.txt");
+const CLI_HELP: &str = include_str!("../docs/help.txt");
 
 fn show_help() {
     println!("\n{}", CLI_HELP);
