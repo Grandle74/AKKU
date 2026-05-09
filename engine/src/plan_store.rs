@@ -42,41 +42,26 @@ fn plan_path(id: &str) -> PathBuf {
 /// Steps are written in a flat format for readability and future tooling.
 pub(crate) fn save(plan: &Plan) -> Result<(), String> {
     fs::create_dir_all(plans_dir()).map_err(|e| e.to_string())?;
-
-    let steps: Vec<serde_json::Value> = plan
-        .steps
-        .iter()
-        .map(|s| {
-            serde_json::json!({
-                "action":      s.action.as_str(),
-                "target":      s.target,
-                "description": s.description,
-            })
-        })
-        .collect();
-
-    let mut data = serde_json::json!({
-        "id":     plan.id,
-        "target": plan.target,
-        "status": "pending",
-        "steps":  steps,
-    });
-
-    // Only written when this plan is a rollback — absent otherwise.
-    if let Some(origin_id) = &plan.rollback_of {
-        data["rollback_of"] = serde_json::json!(origin_id);
-    }
-
-    // Mode is always present for plans created via the API (normal/force/rollback).
-    if let Some(mode) = &plan.mode {
-        data["mode"] = serde_json::json!(mode);
-    }
-
+    let mut data = serde_json::to_value(plan).map_err(|e| e.to_string())?;
+    data["status"] = serde_json::json!("pending");
     fs::write(
         plan_path(&plan.id),
         serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())
+}
+
+/// Loads a Plan from disk — used internally by approve_plan.
+pub(crate) fn load(id: &str) -> Result<Plan, String> {
+    let content =
+        fs::read_to_string(plan_path(id)).map_err(|_| format!("No plan found for id '{}'", id))?;
+    serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
+/// Builds display lines from a saved plan — used by frontends via api::read_plan.
+pub(crate) fn read(id: &str) -> Result<Vec<String>, String> {
+    let plan = load(id)?;
+    Ok(plan.output)
 }
 
 /// Transitions the plan's recorded status field.

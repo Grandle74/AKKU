@@ -18,7 +18,7 @@
 
 use api::{
     Action, IntentOutcome, PropertyValue, RunMode, approve_intent, process_bi_intent,
-    process_tri_intent,
+    process_tri_intent, read_plan,
 };
 use rustyline::error::ReadlineError;
 use std::collections::HashMap;
@@ -203,45 +203,42 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
             print_lines(&plan_text);
         }
 
-        IntentOutcome::RequiresApproval { plan, plan_text } => {
-            print_lines(&plan_text);
-
+        IntentOutcome::RequiresApproval { plan_id } => {
+            if let Ok(plan_text) = read_plan(&plan_id) {
+                print_lines(&plan_text);
+            }
             print!("\nApply this plan? [y/N]: ");
             io::stdout().flush().unwrap();
-
             let mut input = String::new();
             io::stdin().read_line(&mut input).unwrap();
             let approved = matches!(input.trim().to_lowercase().as_str(), "y" | "yes");
 
-            // approve_intent handles auto-rollback on failure and returns a
-            // structured outcome — route it back through render_outcome.
-            match approve_intent(plan, approved) {
-                Ok(lines) => {
-                    println!();
-                    print_result(action, Ok(lines));
-                }
-                Err(outcome) => render_outcome(action, *outcome),
-            }
+            println!();
+            render_outcome(action, approve_intent(&plan_id, approved));
         }
 
         // ── Force path ────────────────────────────────────────────────────────
         IntentOutcome::Applied {
-            plan_text,
+            plan_id,
             result_text,
         } => {
             println!();
-            print_lines(&plan_text);
+            if let Ok(plan_text) = read_plan(&plan_id) {
+                print_lines(&plan_text);
+            }
             println!("\n⚡ --force: auto-approving plan.");
             print_result(action, Ok(result_text));
         }
 
         // --force failed — snapshot saved, user can rollback via History.
         IntentOutcome::ApplyFailed {
-            plan_text,
+            plan_id,
             exec_errors,
         } => {
             println!();
-            print_lines(&plan_text);
+            if let Ok(plan_text) = read_plan(&plan_id) {
+                print_lines(&plan_text);
+            }
             println!("\n⚡ --force: auto-approving plan.");
             println!("✗ Error: Execution failed — snapshot saved for manual rollback.");
             println!();

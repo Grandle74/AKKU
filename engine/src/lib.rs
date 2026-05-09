@@ -19,7 +19,8 @@ mod module_resolver;
 mod plan_store;
 mod planner;
 mod snapshot;
-pub use planner::Plan;
+
+use planner::Plan;
 
 // ── Core Types ────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ pub struct Order {
 /// at the desired state (no steps needed).
 pub struct EngineResult {
     pub output: Vec<String>,
-    pub pending_plan: Option<Plan>,
+    pub pending_plan: Option<String>,
 }
 
 // ── Trip 1 ────────────────────────────────────────────────────────────────────
@@ -83,9 +84,10 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
                     // Hand the plan's display lines to the frontend as-is.
                     // The frontend decides how to render them.
                     let output = plan.output.clone();
+                    let plan_id = plan.id.clone();
                     Ok(EngineResult {
                         output,
-                        pending_plan: Some(plan),
+                        pending_plan: Some(plan_id),
                     })
                 }
             }
@@ -109,32 +111,31 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
 /// Takes the in-memory Plan that was returned from `execute_order` —
 /// no file reload is needed for execution. The plan file (written by
 /// `execute_order` before returning) is only updated here for audit-trail purposes.
-pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<String>> {
+pub fn approve_plan(id: &str, approved: bool) -> Result<Vec<String>, Vec<String>> {
     if !approved {
-        let _ = plan_store::update_status(&plan.id, "rejected");
+        let _ = plan_store::update_status(id, "rejected");
         return Ok(vec!["Plan rejected.".to_string()]);
     }
 
-    // Rollback plans skip snapshot — restoring a broken state is meaningless.
+    let plan = plan_store::load(id).map_err(|e| vec![e])?;
+
     if plan.rollback_of.is_none()
         && let Err(e) = snapshot::save(&plan.id, &plan.module_id.to_domain(), &plan.target)
     {
-        let _ = plan_store::update_status(&plan.id, "aborted");
+        let _ = plan_store::update_status(id, "aborted");
         return Err(vec![e]);
     }
 
-    // Mark as executing BEFORE the first step. If the process crashes mid-flight,
-    // the file reflects "executing" rather than "pending", aiding diagnosis.
-    plan_store::update_status(&plan.id, "executing").map_err(|e| vec![e])?;
+    plan_store::update_status(id, "executing").map_err(|e| vec![e])?;
 
     let result = executor::execute_plan(&plan);
 
     match &result {
         Ok(_) => {
-            let _ = plan_store::update_status(&plan.id, "completed");
+            let _ = plan_store::update_status(id, "completed");
         }
         Err(_) => {
-            let _ = plan_store::update_status(&plan.id, "failed");
+            let _ = plan_store::update_status(id, "failed");
         }
     }
 
@@ -149,24 +150,22 @@ pub fn approve_plan(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<Strin
 /// Called by the History TUI to show the user what will be restored
 /// before they confirm. The returned Plan is passed to `approve_plan`
 /// on the user's second Enter.
-pub fn preview_rollback_plan(origin_plan_id: &str) -> Result<Plan, Vec<String>> {
+pub fn preview_rollback_plan(origin_plan_id: &str) -> Result<(String, Vec<String>), Vec<String>> {
     let snapshot = snapshot::load(origin_plan_id).map_err(|e| vec![e])?;
     let order = snapshot.into_order().map_err(|e| vec![e])?;
-
     let module = module_resolver::ModuleId::resolve(&order.domain).map_err(|e| vec![e])?;
     let maybe_plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
 
     let Some(mut plan) = maybe_plan else {
-        return Err(vec![
-            "Target is already at the pre-execution state — nothing to restore.".to_string(),
-        ]);
+        return Ok((String::new(), vec![]));
     };
 
     plan.rollback_of = Some(origin_plan_id.to_string());
     plan.mode = Some("rollback".to_string());
     plan_store::save(&plan).map_err(|e| vec![e])?;
 
-    Ok(plan)
+    let descriptions = plan.steps.iter().map(|s| s.description.clone()).collect();
+    Ok((plan.id, descriptions))
 }
 
 /// Restores a target to its pre-execution state by loading the snapshot
@@ -176,7 +175,6 @@ pub fn preview_rollback_plan(origin_plan_id: &str) -> Result<Plan, Vec<String>> 
 /// No snapshot is taken before this execution (rollback_of is Some).
 /// Used by the auto-rollback path only — the History TUI uses
 /// preview_rollback_plan + approve_plan instead.
-pub fn rollback_plan(origin_plan_id: &str) -> Result<Vec<String>, Vec<String>> {
-    let plan = preview_rollback_plan(origin_plan_id)?;
-    approve_plan(plan, true)
+pub fn read_plan(id: &str) -> Result<Vec<String>, String> {
+    plan_store::read(id)
 }

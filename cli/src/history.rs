@@ -29,7 +29,8 @@
 // This module has zero rollback logic of its own — it is display and
 // routing only. All state transitions live in the API and engine layers.
 
-use api::{IntentOutcome, Plan, approve_intent, preview_rollback_intent};
+use api::{IntentOutcome, approve_intent, preview_rollback_intent};
+
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
@@ -51,7 +52,7 @@ use std::{
 /// absent on pending plans, present once execution begins.
 #[derive(Deserialize)]
 struct StoredStep {
-    action: String,
+    action: serde_json::Value,
     #[serde(rename = "target")]
     _target: String,
     description: String,
@@ -142,7 +143,7 @@ struct TuiState {
     showing_popup: bool,
     /// The generated rollback plan shown in the popup, awaiting user confirmation.
     /// Set when showing_popup becomes true; consumed (and cleared) on confirmation.
-    pending_rollback_plan: Option<Plan>,
+    pending_rollback_plan: Option<(String, Vec<String>)>,
 }
 
 fn run_tui(entries: Vec<PlanEntry>) -> Result<(), String> {
@@ -183,8 +184,8 @@ fn run_tui(entries: Vec<PlanEntry>) -> Result<(), String> {
                 KeyCode::Esc => {
                     if state.showing_popup {
                         state.showing_popup = false;
-                        if let Some(plan) = state.pending_rollback_plan.take() {
-                            let _ = approve_intent(plan, false);
+                        if let Some((plan_id, _)) = state.pending_rollback_plan.take() {
+                            let _ = approve_intent(&plan_id, false);
                         }
                         state.message = Some("Rollback cancelled.".into());
 
@@ -247,18 +248,16 @@ fn run_tui(entries: Vec<PlanEntry>) -> Result<(), String> {
 fn handle_enter(state: &mut TuiState) {
     let entry = &state.entries[state.selected];
 
-    // Only completed or failed plans with a snapshot can be rolled back.
-    // Rejected plans never executed. Executing plans are mid-flight.
     if matches!(entry.status.as_str(), "rejected" | "executing" | "pending") {
         state.message = Some(format!("Cannot rollback a '{}' plan.", entry.status));
         return;
     }
 
     if state.showing_popup {
-        // Second Enter — execute the already-generated rollback plan.
         state.showing_popup = false;
 
-        let plan = match state.pending_rollback_plan.take() {
+        // Bug 1 fix: single .take() — consume once, use the value.
+        let (plan_id, _) = match state.pending_rollback_plan.take() {
             Some(p) => p,
             None => {
                 state.message = Some("✗ No rollback plan ready — try again.".into());
@@ -266,27 +265,44 @@ fn handle_enter(state: &mut TuiState) {
             }
         };
 
-        let result = approve_intent(plan, true);
-        state.message = Some(match result {
-            Ok(_) => "✔ Rollback applied — press Esc to exit and see details.".into(),
-            Err(outcome) => format_rollback_result(*outcome),
-        });
+        match approve_intent(&plan_id, true) {
+            IntentOutcome::Immediate(lines) => {
+                state.message = Some(lines.first().cloned().unwrap_or_else(|| "✔ Done.".into()));
+            }
+            IntentOutcome::RolledBack { .. } => {
+                state.message = Some("✔ Rollback applied.".into());
+            }
+            IntentOutcome::RollbackFailed { errors, .. } => {
+                state.message = Some(format!(
+                    "✗ {}",
+                    errors
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Rollback failed.".into())
+                ));
+            }
+            _ => {
+                state.message = Some("✗ Unexpected outcome — check system state.".into());
+            }
+        }
 
-        // Reload entries so the new rollback plan appears in the list.
+        // Bug 2 fix: reload on approval, same as the Esc/rejection path.
         if let Ok(fresh) = load_entries() {
-            // Keep selection clamped within the new entry count.
             if state.selected >= fresh.len() {
                 state.selected = fresh.len().saturating_sub(1);
             }
             state.entries = fresh;
         }
     } else {
-        // First Enter — generate the rollback plan and open the preview popup.
         let plan_id = entry.id.clone();
 
         match preview_rollback_intent(&plan_id) {
-            Ok(plan) => {
-                state.pending_rollback_plan = Some(plan);
+            Ok((plan_id, _)) if plan_id.is_empty() => {
+                state.message =
+                    Some("✔ Already at pre-execution state — nothing to restore.".into());
+            }
+            Ok((plan_id, descriptions)) => {
+                state.pending_rollback_plan = Some((plan_id, descriptions));
                 state.showing_popup = true;
                 state.message = None;
             }
@@ -478,7 +494,7 @@ fn draw_list_row(
     };
 
     let row = format!(
-        "{} {}  {:<12}  {:<9}  {}",
+        "{} {}  {:<12}  {:<9}  {:<8}",
         num_col, date_col, target_col, &entry.status, mode_col
     );
     let row = truncate(&row, width.saturating_sub(2));
@@ -584,20 +600,16 @@ fn draw_popup(
     body.push((format!("  {}", sep), Color::DarkGrey));
 
     match &state.pending_rollback_plan {
-        Some(plan) if !plan.steps.is_empty() => {
-            for step in &plan.steps {
-                body.push((format!("    • {}", step.description), Color::Reset));
+        Some((_, descriptions)) if !descriptions.is_empty() => {
+            for desc in descriptions {
+                body.push((format!("    • {}", desc), Color::Reset));
             }
         }
-        Some(_) => {
-            body.push((
-                "    (already at pre-execution state)".into(),
-                Color::DarkGrey,
-            ));
-        }
-        None => {
-            body.push(("    (rollback plan unavailable)".into(), Color::DarkGrey));
-        }
+        Some(_) => body.push((
+            "    (already at pre-execution state)".into(),
+            Color::DarkGrey,
+        )),
+        None => body.push(("    (rollback plan unavailable)".into(), Color::DarkGrey)),
     }
 
     body.push((format!("  {}", sep), Color::DarkGrey));
@@ -780,31 +792,6 @@ fn conflict_warning(entries: &[PlanEntry], selected: usize) -> Option<String> {
     ))
 }
 
-// ── Rollback result rendering ─────────────────────────────────────────────────
-
-/// Converts an IntentOutcome from approve_intent() into a one-line
-/// message for the TUI footer.
-fn format_rollback_result(outcome: IntentOutcome) -> String {
-    match outcome {
-        IntentOutcome::RolledBack { .. } => {
-            "✔ Rollback applied — press Esc to exit and see details.".into()
-        }
-        IntentOutcome::RollbackFailed { errors, .. } => {
-            format!(
-                "✗ Rollback failed — {}",
-                errors.first().cloned().unwrap_or_default()
-            )
-        }
-        IntentOutcome::ApplyFailedRolledBack { exec_errors, .. } => {
-            format!(
-                "✗ Execution failed — {}",
-                exec_errors.first().cloned().unwrap_or_default()
-            )
-        }
-        _ => "✗ Unexpected outcome from rollback — check system state.".into(),
-    }
-}
-
 // ── Data loading ──────────────────────────────────────────────────────────────
 
 /// Reads all plan files from disk, parses them, and returns them sorted
@@ -896,6 +883,13 @@ fn date_from_id(id: &str) -> String {
 
 // ── Summary generation ────────────────────────────────────────────────────────
 
+fn action_name(v: &serde_json::Value) -> &str {
+    v.as_object()
+        .and_then(|o| o.values().next())
+        .and_then(|v| v.as_str())
+        .unwrap_or("?")
+}
+
 /// Builds a one-line human-readable action summary from a plan's steps.
 ///
 /// Examples:
@@ -917,7 +911,7 @@ fn build_summary(plan: &StoredPlan) -> String {
     let actions: Vec<&str> = plan
         .steps
         .iter()
-        .map(|s| s.action.as_str())
+        .map(|s| action_name(&s.action))
         .filter(|a| seen.insert(*a))
         .collect();
 
