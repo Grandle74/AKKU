@@ -22,6 +22,7 @@
 //                     the user picks a plan from History. Not yet wired in the
 //                     CLI (History is not implemented), but the full path exists.
 
+pub use engine::Plan;
 pub use engine::PropertyValue;
 use engine::{Domain, Order, approve_plan as engine_approve, execute_order};
 use std::collections::HashMap;
@@ -279,4 +280,8 @@ fn parse_domain(s: &str) -> Result<Domain, String> {
         "service" | "services" | "srv" => Ok(Domain::Services),
         _ => Err(format!("Unknown module '{}' — available: services", s)),
     }
+}
+
+pub fn list_plans() -> Result<Vec<Plan>, String> {
+    engine::list_plans()
 }

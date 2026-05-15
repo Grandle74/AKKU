@@ -20,7 +20,7 @@ mod plan_store;
 mod planner;
 mod snapshot;
 
-use planner::Plan;
+pub use planner::Plan;
 
 // ── Core Types ────────────────────────────────────────────────────────────────
 
@@ -177,4 +177,8 @@ pub fn preview_rollback_plan(origin_plan_id: &str) -> Result<(String, Vec<String
 /// preview_rollback_plan + approve_plan instead.
 pub fn read_plan(id: &str) -> Result<Vec<String>, String> {
     plan_store::read(id)
+}
+
+pub fn list_plans() -> Result<Vec<Plan>, String> {
+    plan_store::list_all()
 }

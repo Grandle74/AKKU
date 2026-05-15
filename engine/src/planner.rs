@@ -23,6 +23,9 @@ use std::collections::HashMap;
 /// for the current session. Each frontend is responsible for rendering its
 /// own view of the plan steps. The file format uses `steps` as the source
 /// of truth.
+fn default_pending() -> String {
+    "pending".to_string()
+}
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Plan {
     pub id: String,
@@ -30,12 +33,14 @@ pub struct Plan {
     pub target: String,
     pub output: Vec<String>,
     pub steps: Steps,
+    #[serde(default = "default_pending")]
+    pub status: String,
     /// Execution mode recorded for the audit trail: "normal", "force", or "rollback".
     /// Set by the API layer before saving; None on freshly planned in-memory plans.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) mode: Option<String>,
+    pub mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) rollback_of: Option<String>,
+    pub rollback_of: Option<String>,
 }
 
 // ── ID Generation ─────────────────────────────────────────────────────────────
@@ -101,6 +106,7 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
         target: target.to_string(),
         output,
         steps,
+        status: "pending".to_string(),
         rollback_of: None,
         mode: None,
     }))
