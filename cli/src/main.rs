@@ -1,6 +1,6 @@
 // cli/src/main.rs
 //
-// commando — the developer/tester reference CLI for YaST3.
+// commando — the developer/tester reference CLI for AKKU.
 //
 // This is NOT a consumer-facing tool. It is a reference implementation
 // that demonstrates how a frontend should call the API layer. Future
@@ -27,9 +27,9 @@ use std::io::{self, Write};
 mod history;
 
 fn main() {
-    println!("Welcome to YaST3 (prototype)!");
+    println!("Welcome to AKKU (prototype)!");
     println!(
-        "This is a prototype of YaST3, a system configuration tool.\n{}",
+        "This is a prototype of AKKU, a system configuration tool.\n{}",
         "─".repeat(62)
     );
     println!("Enter \"help\" for commands list\n");
@@ -335,7 +335,7 @@ fn print_result(action_str: &str, result: Result<Vec<String>, Vec<String>>) {
 /// Used for both auto-rollback (ApplyFailedRolledBack)
 /// and manual rollback (RolledBack).
 fn print_rollback_block(lines: &[String]) {
-    let header = "↩ Rollback applied:";
+    let header = "✔ Rollback applied:";
     let divider = "─".repeat(header.len());
     println!("{}", header);
     println!("{}", divider);
@@ -387,7 +387,7 @@ fn parse_flags(input: &str) -> (Vec<String>, RunMode) {
 
 // ── Help ──────────────────────────────────────────────────────────────────────
 
-const CLI_HELP: &str = include_str!("../doc/help.txt");
+const CLI_HELP: &str = include_str!("../docs/help.txt");
 
 fn show_help() {
     println!("\n{}", CLI_HELP);

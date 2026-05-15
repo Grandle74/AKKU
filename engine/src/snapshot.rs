@@ -13,7 +13,7 @@ use std::{collections::HashMap, fs, path::PathBuf};
 
 fn snapshot_path(plan_id: &str) -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()))
-        .join(".yast3/snapshots")
+        .join(".akku/snapshots")
         .join(format!("{}.snapshot.json", plan_id))
 }
 

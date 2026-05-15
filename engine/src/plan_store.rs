@@ -2,7 +2,7 @@
 //
 // All filesystem operations for Plan persistence.
 //
-// This is the single owner of the ~/.yast3/plans/ directory.
+// This is the single owner of the ~/.akku/plans/ directory.
 // No other module reads or writes plan files. All plan lifecycle
 // transitions (pending → executing → completed/failed/rejected)
 // flow through this module.
@@ -25,7 +25,7 @@ use std::{fs, path::PathBuf};
 
 fn plans_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".yast3").join("plans")
+    PathBuf::from(home).join(".akku").join("plans")
 }
 
 fn plan_path(id: &str) -> PathBuf {
