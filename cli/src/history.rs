@@ -296,7 +296,10 @@ fn handle_enter(state: &mut TuiState) {
     } else {
         let plan_id = entry.id.clone();
 
-        match preview_rollback_intent(&plan_id) {
+        let preview_result = std::panic::catch_unwind(|| preview_rollback_intent(&plan_id))
+            .unwrap_or_else(|_| Err(vec!["Internal error — engine panicked".into()]));
+
+        match preview_result {
             Ok((plan_id, _)) if plan_id.is_empty() => {
                 state.message =
                     Some("✔ Already at pre-execution state — nothing to restore.".into());
@@ -822,7 +825,7 @@ fn load_entries() -> Result<Vec<PlanEntry>, String> {
 
 fn plans_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".yast3").join("plans")
+    PathBuf::from(home).join(".akku").join("plans")
 }
 
 /// Converts a raw StoredPlan into the display model used by the TUI.
@@ -929,12 +932,14 @@ fn scroll_offset(selected: usize, visible_rows: usize) -> usize {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    let char_count = s.chars().count();
+    if char_count <= max {
         s.to_string()
     } else if max > 1 {
-        format!("{}…", &s[..max.saturating_sub(1)])
+        let truncated: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{}…", truncated)
     } else {
-        s[..max].to_string()
+        s.chars().take(max).collect()
     }
 }
 

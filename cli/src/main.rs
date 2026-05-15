@@ -335,7 +335,7 @@ fn print_result(action_str: &str, result: Result<Vec<String>, Vec<String>>) {
 /// Used for both auto-rollback (ApplyFailedRolledBack)
 /// and manual rollback (RolledBack).
 fn print_rollback_block(lines: &[String]) {
-    let header = "↩ Rollback applied:";
+    let header = "✔ Rollback applied:";
     let divider = "─".repeat(header.len());
     println!("{}", header);
     println!("{}", divider);
