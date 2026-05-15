@@ -225,7 +225,7 @@ pub fn reset_service() -> Result<Vec<String>, String> {
     }
 }
 
-const HELP_TEXT: &str = include_str!("../doc/help.txt");
+const HELP_TEXT: &str = include_str!("../docs/help.txt");
 pub fn help_service() -> Vec<String> {
     let mut lines: Vec<String> = HELP_TEXT.lines().map(|s| s.to_string()).collect();
 

@@ -1,6 +1,6 @@
 // shared_libs/src/lib.rs
 //
-// Cross-crate type definitions shared by every layer of YaST3.
+// Cross-crate type definitions shared by every layer of AKKU.
 //
 // Dependency rule: this crate has ZERO internal dependencies — it only uses
 // the standard library and serde. All other crates depend on this one.

@@ -1,202 +1,134 @@
-# YaST3
-> **Codename: Project ANU** — A declarative system configuration engine written in Rust.
+<div align="center">
+     
+<img src="icon.png" alt="AKKU" width="120"/>
 
-[![Status](https://img.shields.io/badge/status-active%20prototype-orange.svg)]()
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/license-TBD-lightgrey.svg)]()
+# AKKU
+ Another Konfig & Kontrol Utility
+> Declarative system configuration — plan, apply, and rollback across any OS and init system.
+ 
+![Status](https://img.shields.io/badge/status-prototype-blue)
+![License](https://img.shields.io/badge/license-GPL--3.0-blue)
+![Rust](https://img.shields.io/badge/rust-1.89.0+-orange?logo=rust)
+ 
+</div>
 
----
 
-## What Is This?
+## Overview
 
-YaST3 is a **system configuration engine** that lets you express the *desired state* of your system rather than issuing imperative commands. You describe what you want; the engine figures out how to get there safely.
+Managing system configuration today means memorizing imperative commands, manually tracking state, and hoping nothing breaks. AKKU changes that: describe the system state you want, and AKKU plans the path, applies it safely, and rolls back automatically if anything goes wrong.
 
-```
-# Imperative (old way)
-$ systemctl enable nginx
-$ systemctl start nginx
+Where Ansible orchestrates fleets and NixOS rebuilds entire systems, AKKU does one thing well: take any machine from its current state to your desired state — safely, step by step, through any frontend you choose.
 
-# Declarative (YaST3 way)
-> service nginx running=true enabled=true
-```
+## Why AKKU?
 
-The engine inspects current state, plans the minimal steps to reach the desired state, validates for conflicts before touching anything, and executes in the correct order.
+- **Declarative** — describe the desired state; AKKU finds the optimal path to reach it.
+- **Safe by default** — automatic rollback on failure, manual rollback on demand, conflict detection before anything runs.
+- **API-first** — one logic layer, fully interchangeable frontends (TUI, CLI, GUI, Web).
+- **Modular** — a stable core engine communicates with pluggable modules. First-party and community modules build an ever-growing ecosystem of system capabilities.
+- **System-wide** — install the module that fits your init system: systemd, OpenRC, and beyond.
+- **Error-aware** — reports what failed, why it failed, and how to fix it, in plain language.
 
----
+## Status
+
+| Component                               | Status         |
+|-----------------------------------------|----------------|
+| Core Engine                             | ✅ Done        |
+| API Layer                               | ✅ Done        |
+| Conflict Detection                      | ✅ Done        |
+| Declarative Syntax                      | ✅ Done        |
+| Action Modes *(Normal, Force, Dry-run)* | ✅ Done        |
+| Snapshots                               | ✅ Done        |
+| Rollback                                | ✅ Done        |
+| CLI `commando` *(reference frontend)*   | ✅ Done        |
+| `systemd` Service Module                | 🔧 In Progress |
+| Smart Error Awareness                   | 🔜 Planned     |
+| Module Manager                          | 🔜 Planned     |
+| Third-party Modules                     | 🔜 Planned     |
 
 ## Architecture
 
-```
-Frontend (CLI)
-     ↓
-  API Layer          — intent parsing, input validation, conflict detection
-     ↓
-  Core Engine        — state inspection, planning, execution
-     ↓
-  Modules            — domain-specific logic (services, network, users…)
-     ↓
-  System Tools       — systemctl, ip, useradd, etc.
-```
-
-The frontend is **replaceable by design**. `commando` (see below) is the reference CLI used during development — but any interface that speaks to the API layer works.
-
----
-
-## Current State
-
-| Component            | Status                          |
-|----------------------|---------------------------------|
-| CLI (`commando`)     | ✅ Working                      |
-| API layer            | ✅ Working                      |
-| Core engine          | ✅ Working                      |
-| Services module      | ✅ Working                      |
-| Declarative syntax   | 🔄 In progress                  |
-| Conflict detection   | 🔄 In progress                  |
-| Rollback             | ❌ Not yet implemented          |
-| Other modules        | ❌ Not yet implemented          |
-
-**What works today:**
+AKKU follows a strict unidirectional layered design — each layer communicates only with the one directly below it, never sideways or upward. Frontends are fully replaceable; the engine and modules are frontend-agnostic.
 
 ```
-> service list
-> service status nginx
-> service start nginx
-> service enable nginx
-> service stop nginx
-> service disable nginx
-> service mask nginx
-> service unmask nginx
+AKKU/                    # each crate follows: 'src/' + 'docs/'
+├── cli/                 # Reference frontend (commando)
+├── api/                 # Orchestration layer
+├── engine/              # Core engine
+├── shared/              # Shared types and utilities
+├── modules/             # Modules library
+│   ├── module_manager/  # Planned
+│   └── services/        # systemd service module
+├── tests/               # Planned
+├── ui_concept/          # Future GUI concept as HTML pages
+└── README.md
 ```
 
-**What's being added:**
-
-```
-# Declarative state (specify end state, not actions)
-> service nginx running=true enabled=true
-
-# Conflict detection (validated before execution)
-> service nginx enabled=true masked=true
-✗ Conflict: cannot enable a masked service. Unmask it first.
-```
-
----
-
-## Design Goals
-
-### 1. Declarative over Imperative
-Users specify the desired end state. The engine resolves the correct sequence of actions automatically — including ordering (e.g. unmask → enable → start) and avoiding impossible states.
-
-### 2. Conflict Detection Before Execution
-Impossible or contradictory states are caught at the API layer before any system call is made.
-
-```
-enabled=true  +  masked=true    → error
-running=true  +  masked=true    → error
-```
-
-### 3. Generalized Module System
-The API and engine are domain-agnostic. The services module is the first implementation, but the same pipeline handles any future module — network, users, firewall — without changes to the core.
-
-### 4. Safe Execution
-Before touching the system, the engine knows:
-- What the current state is
-- What steps are needed
-- In what order
-- What rollback would look like *(planned)*
-
----
-
-## `commando` — The Reference Frontend
-
-`commando` is a minimal CLI that exercises the full stack. It is **not** the final user-facing interface — it exists so that:
-
-- Developers can test the engine and modules directly
-- Module authors have a working reference to build against
-- The frontend contract stays honest (if it's hard to use via CLI, the API is wrong)
-
-```bash
-cargo run --bin commando
-commando(v0.1)~> service status nginx
-commando(v0.1)~> service nginx running=true enabled=true
-```
-
-Anyone building a frontend (TUI, web UI, daemon, etc.) should use `commando` as the reference for how the API behaves.
-
----
+> **Note:** This monorepo layout reflects the current development state. From v0.1 onward, each crate will live in its own repository.
 
 ## Getting Started
 
 ### Prerequisites
-- Rust 1.75+ — install via [rustup](https://rustup.rs/)
-- Linux with systemd
-- `sudo` access (required for actual system operations)
 
-### Build & Run
+- `Rust 1.89.0+` — install via [rustup](https://rustup.rs/)
+- Linux with systemd (current modules are systemd-based)
+- Root access via `sudo` (required for actual system operations)
+
+### Run
 
 ```bash
-git clone <repo-url>
-cd yast3
-
-cargo build
-
-# Launch the reference CLI
-cargo run --bin commando
+git clone https://github.com/Grandle74/AKKU.git
+cd AKKU
+cargo run
 ```
 
-> ⚠️ Commands that modify system state (start, enable, mask, etc.) require sudo. `status` and `list` do not.
+## Usage
 
----
+```bash
+# <module> <action> [target] [properties...] [flags]
 
-## Project Structure
+# Read-only commands
+commando(v0.1)~> service reset          # no target
+commando(v0.1)~> service reload nginx   # targeted
 
+# Declarative state commands
+commando(v0.1)~> service cfg nginx running=1 enabled=yes    # Normal mode
+commando(v0.1)~> service cfg nginx masked=1 --force         # Force mode
+commando(v0.1)~> service cfg nginx running=false --dry-run  # Dry-run mode
 ```
-yast3/
-├── cli/              # commando — reference frontend
-├── api/              # Intent parsing, validation, conflict detection
-├── engine/           # Planner, executor, state inspection
-└── modules/
-    └── services/     # systemd service management
-```
 
-The plan is to eventually split these into separate repositories under a dedicated project organization once the architecture is stable.
+## Roadmap
 
----
+Track live progress on the [v0.1 Milestone](https://github.com/Grandle74/AKKU/milestone/1).
 
-## What's Next
+### v0.1 — Foundations
+- Hardened end-to-end core (API + Engine)
+- Module Manager — the backbone of AKKU's module ecosystem
+- `systemd` service module reworked as a solid first-party reference
+- A second lightweight module to validate the module system
+- CI setup and minimum supported Rust version pinned
+- CONTRIBUTING.md — architectural rules, layer contracts, contribution guidelines
 
-- **Declarative syntax** — full support for `service <name> key=value` style
-- **Conflict validation** — enforce impossible state rules at API level
-- **Rollback** — generate and store recovery steps during planning phase
-- **Network module** — first expansion beyond services
-- **Proper error types** — current error handling is too generic
+### Beyond v0.1
+- Each crate in its own repository under a dedicated project account
+- Module ecosystem open to third-party contributions
+- Early testers onboarded once the codebase reaches a stable shape
+- Glossary and developer documentation
 
----
+## Contributing
 
-## Honest Limitations
+AKKU is approaching its first stable release. Code contributions are not open yet — the architecture is still being finalized for v0.1. That said:
 
-This is an active prototype. Known gaps:
+- **Bug reports and feedback** are welcome via [GitHub Issues](https://github.com/Grandle74/AKKU/issues).
+- **Architectural discussion** is open in Discussions.
 
-- Rollback is not implemented yet — failed operations do not auto-recover
-- Only the services module exists — no cross-module coordination
-- Sequential execution only — no parallelism
-- Error messages need work — some are still too generic
+Contributing guidelines (including layer contracts and architectural invariants) will be published alongside v0.1.
 
-These are known priorities, not surprises.
+## License
 
----
+This project is licensed under the [GPL-3.0 License](LICENSE).
 
-## Inspiration
+## Background
 
-The design draws from:
-- **Terraform** — plan/apply workflow and explicit state management
-- **NixOS** — declarative configuration, atomic changes
-- **Ansible** — idempotency and check mode (dry-run)
-- **Kubernetes** — desired state reconciliation
+AKKU started as a dream to rewrite YaST2 in Rust — a beloved tool that went unmaintained. That dream gradually shifted: not a rewrite, but something new. Discovering NixOS and the declarative paradigm sharpened the vision further. The plan/apply model was arrived at independently — though it turns out [Terraform](https://terraform.io) had the same idea for infrastructure.
 
-The key difference: YaST3 focuses on **pre-execution validation and planning** rather than post-execution reconciliation. Conflicts are caught before the system is touched.
-
----
-
-## Status Note
-
-This repository is private and under active development. The architecture is stabilizing but not finalized. The naming situation is being handled separately — for now, **YaST3** is the working name and **ANU** is the project codename.
+Conceptually inspired by [NixOS](https://nixos.org), [YaST](https://yast.opensuse.org/), and [Cockpit](https://cockpit-project.org).
