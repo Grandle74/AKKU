@@ -151,6 +151,18 @@ pub fn unmask_service(service: &str) -> Result<Vec<String>, String> {
     Ok(result)
 }
 
+/// Clears the failed state of a specific service.
+pub fn reset_failed_service(service: &str) -> Result<Vec<String>, String> {
+    systemctl_queries::validate_service_exists(service).map_err(|e| e.join("\n"))?;
+
+    Command::new("sudo")
+        .args(["systemctl", "reset-failed", service])
+        .status()
+        .map_err(|e| e.to_string())?;
+
+    Ok(vec![format!("Cleared failed state for '{}'", service)])
+}
+
 // ── No-Target Actions ─────────────────────────────────────────────────────────
 
 pub struct ServiceEntry {
@@ -184,6 +196,10 @@ pub fn list_services() -> Result<Vec<ServiceEntry>, String> {
     Ok(entries)
 }
 
+/// Resets ALL failed services system-wide.
+///
+/// This is a Meta action only — invoked by `service reset` from the CLI.
+/// Plans never use this; they use `reset_failed_service(target)` instead.
 pub fn reset_service() -> Result<Vec<String>, String> {
     let failed_output = Command::new("systemctl")
         .args(["list-units", "--failed", "--no-legend", "--plain"])

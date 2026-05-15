@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 shared_libs = { path = "../../shared" }
+serde = { workspace = true }

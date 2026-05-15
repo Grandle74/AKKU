@@ -26,11 +26,16 @@ use std::collections::HashMap;
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Plan {
     pub id: String,
-    pub module_id: ModuleId,
+    pub(crate) module_id: ModuleId,
     pub target: String,
-    #[serde(skip)]
     pub output: Vec<String>,
     pub steps: Steps,
+    /// Execution mode recorded for the audit trail: "normal", "force", or "rollback".
+    /// Set by the API layer before saving; None on freshly planned in-memory plans.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) rollback_of: Option<String>,
 }
 
 // ── ID Generation ─────────────────────────────────────────────────────────────
@@ -72,35 +77,39 @@ fn module_prefix(module: &ModuleId) -> &'static str {
 /// `None` means the service is already at the desired state — the caller
 /// should surface this to the user without creating a plan file.
 pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, String> {
-    let target = order.target.clone().ok_or("No target provided")?;
-
+    let target = order.target.as_deref().ok_or("No target provided")?;
     let steps: Steps = match module {
-        ModuleId::Services => plan_services(target.clone(), &order.desired_properties)?,
+        ModuleId::Services => plan_services(target, &order.desired_properties)?,
     };
 
     if steps.is_empty() {
         return Ok(None);
     }
 
-    // Each step description becomes its own line so any frontend can
-    // render, join, or format the list however it sees fit.
-    let mut output = vec![format!("=== Plan for '{}' ===", target)];
+    // Header and footer share the same width so the box is balanced regardless
+    // of the target name length. Minimum width of 3 keeps very short names tidy.
+    let header = format!("=== Plan for '{}' ===", target);
+    let footer = "=".repeat(header.len());
+
+    let mut output = vec![header];
     output.extend(steps.iter().map(|s| format!("  • {}", s.description)));
-    output.push("=====================".to_string());
+    output.push(footer);
 
     Ok(Some(Plan {
         id: generate_id(module_prefix(module)),
         module_id: module.clone(),
-        target,
+        target: target.to_string(),
         output,
         steps,
+        rollback_of: None,
+        mode: None,
     }))
 }
 
 // ── Module-Specific Planners ──────────────────────────────────────────────────
 
-fn plan_services(target: String, props: &HashMap<String, PropertyValue>) -> Result<Steps, String> {
-    let current = services::state_helpers::ServiceCurrentState::new(&target)?;
+fn plan_services(target: &str, props: &HashMap<String, PropertyValue>) -> Result<Steps, String> {
+    let current = services::state_helpers::ServiceCurrentState::new(target)?;
     let desired = services::state_helpers::ServiceDesiredState::from_props(target, props)?;
     let delta = services::state_helpers::calc(&current, &desired);
     Ok(services::state_helpers::to_steps(&delta))

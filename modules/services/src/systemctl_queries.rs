@@ -1,4 +1,4 @@
-// modules/services/src/error_catcher.rs
+// modules/services/src/systemctl_queries.rs
 use std::process::Command;
 
 /// Properties queried from systemd after running a start/stop command.
@@ -31,6 +31,47 @@ impl ServiceProperties {
         props
     }
 
+    /// Parses a block of `systemctl show` output into `self`.
+    /// Called for both the primary poll and the post-active recheck.
+    fn parse_systemctl_output(&mut self, text: &str) {
+        for line in text.lines() {
+            let mut parts = line.splitn(2, '=');
+            let (Some(key), Some(value)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            match key {
+                "LoadState" => self.load_state = value.to_string(),
+                "ActiveState" => self.active_state = value.to_string(),
+                "Result" => self.result = value.to_string(),
+                "SubState" => self.sub_state = value.to_string(),
+                "MainPID" => self.main_pid = value.parse().ok(),
+                "ExecMainStatus" => self.exec_main_status = value.parse().ok(),
+                "ActiveEnterTimestampMonotonic" => {
+                    self.active_enter_timestamp = value.parse().unwrap_or(0)
+                }
+                "InactiveEnterTimestampMonotonic" => {
+                    self.inactive_enter_timestamp = value.parse().unwrap_or(0)
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn query_systemctl(service: &str) -> String {
+        let bytes = Command::new("systemctl")
+            .args([
+                "show",
+                service,
+                "--property=LoadState,ExecMainStatus,Result,ActiveState,\
+                 MainPID,SubState,ActiveEnterTimestampMonotonic,\
+                 InactiveEnterTimestampMonotonic",
+            ])
+            .output()
+            .expect("Failed to query systemctl properties")
+            .stdout;
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
     fn query_and_parse(&mut self, service: String) {
         // Poll until systemd is no longer mid-transition, then read final state.
         // Checks every 150ms, gives up after 3 seconds total (20 attempts).
@@ -38,88 +79,22 @@ impl ServiceProperties {
         const MAX_ATTEMPTS: usize = 20;
 
         for attempt in 0..MAX_ATTEMPTS {
-            let raw_output = Command::new("systemctl")
-                .args([
-                    "show",
-                    &service,
-                    "--property=LoadState,ExecMainStatus,Result,ActiveState,MainPID,SubState,ActiveEnterTimestampMonotonic,InactiveEnterTimestampMonotonic",
-                ])
-                .output()
-                .expect("Failed to query systemctl properties");
+            self.parse_systemctl_output(&Self::query_systemctl(&service));
 
-            let raw_text = String::from_utf8_lossy(&raw_output.stdout)
-                .trim()
-                .to_string();
-
-            let kv_pairs: Vec<(&str, &str)> = raw_text
-                .lines()
-                .filter_map(|line| {
-                    let mut parts = line.splitn(2, '=');
-                    Some((parts.next()?, parts.next()?))
-                })
-                .collect();
-
-            // Parse into self first
-            for (key, value) in &kv_pairs {
-                match *key {
-                    "LoadState" => self.load_state = value.to_string(),
-                    "ActiveState" => self.active_state = value.to_string(),
-                    "Result" => self.result = value.to_string(),
-                    "SubState" => self.sub_state = value.to_string(),
-                    "MainPID" => self.main_pid = value.parse().ok(),
-                    "ExecMainStatus" => self.exec_main_status = value.parse().ok(),
-                    "ActiveEnterTimestampMonotonic" => {
-                        self.active_enter_timestamp = value.parse().unwrap_or(0)
-                    }
-                    "InactiveEnterTimestampMonotonic" => {
-                        self.inactive_enter_timestamp = value.parse().unwrap_or(0)
-                    }
-                    _ => {}
-                }
-            }
-
-            // If systemd is done transitioning, we have the real state — stop polling.
             let still_transitioning = matches!(
                 self.active_state.as_str(),
                 "activating" | "deactivating" | "reloading"
             );
 
             if !still_transitioning {
-                // For active services: confirm the state holds briefly.
-                // Catches Type=simple services that start then immediately crash.
+                // For active services: wait briefly, then recheck.
+                // Catches Type=simple services that exit immediately after start.
                 if self.active_state == "active" {
                     std::thread::sleep(std::time::Duration::from_millis(800));
-                    // One re-query — overwrite self with confirmed final state.
-                    let recheck = Command::new("systemctl")
-                        .args([
-                            "show", &service,
-                            "--property=LoadState,ExecMainStatus,Result,ActiveState,MainPID,SubState,ActiveEnterTimestampMonotonic,InactiveEnterTimestampMonotonic",
-                        ])
-                        .output()
-                        .expect("Failed to re-query systemctl properties");
+                    self.parse_systemctl_output(&Self::query_systemctl(&service));
 
-                    for line in String::from_utf8_lossy(&recheck.stdout).lines() {
-                        let mut parts = line.splitn(2, '=');
-                        if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
-                            match key {
-                                "LoadState" => self.load_state = value.to_string(),
-                                "ActiveState" => self.active_state = value.to_string(),
-                                "Result" => self.result = value.to_string(),
-                                "SubState" => self.sub_state = value.to_string(),
-                                "MainPID" => self.main_pid = value.parse().ok(),
-                                "ExecMainStatus" => self.exec_main_status = value.parse().ok(),
-                                "ActiveEnterTimestampMonotonic" => {
-                                    self.active_enter_timestamp = value.parse().unwrap_or(0)
-                                }
-                                "InactiveEnterTimestampMonotonic" => {
-                                    self.inactive_enter_timestamp = value.parse().unwrap_or(0)
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-
-                    // Now the timestamp check is meaningful — crash has had time to register.
+                    // If the service crashed after appearing active, the inactive
+                    // timestamp will now be newer than the active one.
                     if self.inactive_enter_timestamp > self.active_enter_timestamp
                         && self.inactive_enter_timestamp != 0
                     {
@@ -130,7 +105,6 @@ impl ServiceProperties {
                 return;
             }
 
-            // Still transitioning — wait and retry, unless this was the last attempt.
             if attempt < MAX_ATTEMPTS - 1 {
                 println!(
                     "Waiting for service to settle... ({}/{})",
@@ -147,18 +121,20 @@ impl ServiceProperties {
 /// Returns an error if the service does not exist on this system.
 pub fn validate_service_exists(service: &str) -> Result<(), Vec<String>> {
     let output = Command::new("systemctl")
-        .args(["is-enabled", service])
+        .args(["show", service, "--property=LoadState"])
         .output()
-        .expect("Failed to check service");
+        .expect("Failed to query systemctl");
 
-    let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout);
 
-    if state == "not-found" || (!output.status.success() && state.is_empty()) {
-        Err(vec![
-            format!("Service '{}' doesn't exist", service)
-                .as_str()
-                .to_string(),
-        ])
+    // `systemctl show` exits 0 even for unknown units — LoadState is the ground truth.
+    let load_state = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("LoadState="))
+        .unwrap_or("");
+
+    if load_state == "not-found" || load_state.is_empty() {
+        Err(vec![format!("Service '{}' doesn't exist", service)])
     } else {
         Ok(())
     }

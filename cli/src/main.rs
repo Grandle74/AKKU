@@ -18,11 +18,13 @@
 
 use api::{
     Action, IntentOutcome, PropertyValue, RunMode, approve_intent, process_bi_intent,
-    process_tri_intent,
+    process_tri_intent, read_plan,
 };
 use rustyline::error::ReadlineError;
 use std::collections::HashMap;
 use std::io::{self, Write};
+
+mod history;
 
 fn main() {
     println!("Welcome to AKKU (prototype)!");
@@ -50,6 +52,7 @@ fn main() {
 
                 match parts[0].as_str() {
                     "help" => show_help(),
+                    "history" => history::show_history(),
                     "exit" | "quit" => {
                         println!("Exiting...");
                         break 'repl;
@@ -60,6 +63,9 @@ fn main() {
                     }
                     _ => handle_intent(&parts, mode),
                 }
+
+                // One blank line after every command's output, before the next prompt.
+                println!();
             }
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                 println!("Exiting...");
@@ -80,11 +86,12 @@ fn main() {
 /// Intent shapes:
 ///   1 part  → `domain`                        → hint to use help
 ///   2 parts → `domain action`                 → bi-intent (Meta only)
-///   3 parts → `domain action target`          → tri-intent (Custom/Config)
-///   4+ parts→ `domain cfg target key=val ...` → declarative tri-intent
+///   3 parts → `domain action target`          → tri-intent (Custom only)
+///   4+ parts→ `domain cfg target key=val ...` → declarative tri-intent (Config only)
 fn handle_intent(parts: &[String], mode: RunMode) {
     let domain = &parts[0];
 
+    println!();
     match parts.len() {
         1 => println!("See '{} help' for available commands.", domain),
 
@@ -180,12 +187,12 @@ fn handle_outcome(action: &str, result: Result<IntentOutcome, Vec<String>>) {
 
 /// Renders an IntentOutcome variant to the terminal.
 ///
-/// Each variant maps to a distinct user experience:
-///   Immediate          → print output directly
-///   DryRun             → print the plan, no prompt
-///   RequiresApproval   → print plan, prompt user, execute Trip 2
-///   AutoApplied        → print plan + banner + result
-///   ApplyFailed        → print plan + banner + errors
+/// Spacing rules (all variants):
+///   - One blank line before a plan block.
+///   - One blank line before the approval prompt.
+///   - One blank line before any status line (success, error, banner).
+///   - One blank line before a rollback block.
+///   - No trailing blank — handle_intent adds it uniformly after every command.
 fn render_outcome(action: &str, outcome: IntentOutcome) {
     match outcome {
         IntentOutcome::Immediate(output) => {
@@ -196,32 +203,98 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
             print_lines(&plan_text);
         }
 
-        IntentOutcome::RequiresApproval { plan, plan_text } => {
-            print_lines(&plan_text);
-
+        IntentOutcome::RequiresApproval { plan_id } => {
+            if let Ok(plan_text) = read_plan(&plan_id) {
+                print_lines(&plan_text);
+            }
             print!("\nApply this plan? [y/N]: ");
             io::stdout().flush().unwrap();
-
             let mut input = String::new();
             io::stdin().read_line(&mut input).unwrap();
             let approved = matches!(input.trim().to_lowercase().as_str(), "y" | "yes");
 
-            print_result(action, approve_intent(plan, approved));
+            println!();
+            render_outcome(action, approve_intent(&plan_id, approved));
         }
 
-        IntentOutcome::AutoApplied {
-            plan_text,
+        // ── Force path ────────────────────────────────────────────────────────
+        IntentOutcome::Applied {
+            plan_id,
             result_text,
         } => {
-            print_lines(&plan_text);
+            println!();
+            if let Ok(plan_text) = read_plan(&plan_id) {
+                print_lines(&plan_text);
+            }
             println!("\n⚡ --force: auto-approving plan.");
             print_result(action, Ok(result_text));
         }
 
-        IntentOutcome::ApplyFailed { plan_text, errors } => {
-            print_lines(&plan_text);
+        // --force failed — snapshot saved, user can rollback via History.
+        IntentOutcome::ApplyFailed {
+            plan_id,
+            exec_errors,
+        } => {
+            println!();
+            if let Ok(plan_text) = read_plan(&plan_id) {
+                print_lines(&plan_text);
+            }
             println!("\n⚡ --force: auto-approving plan.");
-            print_result(action, Err(errors));
+            println!("✗ Error: Execution failed — snapshot saved for manual rollback.");
+            println!();
+            print_lines(&exec_errors);
+        }
+
+        // ── Normal path failures ──────────────────────────────────────────────
+        //
+        // No plan_text here — already printed before the approval prompt.
+        IntentOutcome::ApplyFailedRolledBack {
+            exec_errors,
+            rollback_text,
+        } => {
+            println!("\n✗ Error: Execution failed — state restored.");
+            println!();
+            print_lines(&exec_errors);
+            println!();
+            print_rollback_block(&rollback_text);
+        }
+
+        IntentOutcome::ApplyFailedRollbackFailed {
+            exec_errors,
+            rollback_errors,
+        } => {
+            println!(
+                "\n✗ Error: Execution failed — rollback also failed. System state is unknown."
+            );
+            println!("\nExecution errors:");
+            println!();
+            print_lines(&exec_errors);
+            println!("\nRollback errors:");
+            println!();
+            print_lines(&rollback_errors);
+        }
+
+        // ── Manual rollback outcomes (History flow — not yet wired in CLI) ────
+        //
+        // This is the sole action for this path, so the full block is shown.
+        IntentOutcome::RolledBack {
+            origin_plan_id: _,
+            rollback_text,
+        } => {
+            println!();
+            print_rollback_block(&rollback_text);
+        }
+
+        IntentOutcome::RollbackFailed {
+            origin_plan_id,
+            errors,
+        } => {
+            println!(
+                "✗ Rollback of plan '{}' failed — system state may be inconsistent.",
+                origin_plan_id
+            );
+            println!();
+            print_lines(&errors);
         }
     }
 }
@@ -241,7 +314,7 @@ fn print_result(action_str: &str, result: Result<Vec<String>, Vec<String>>) {
             if !action.is_informational() {
                 // Only prepend "✔ " if the output doesn't already carry one.
                 // Avoids double-prefixing from module-level success messages.
-                if !output.first().map_or(false, |s| s.starts_with('✔')) {
+                if !output.first().is_some_and(|s| s.starts_with('✔')) {
                     print!("✔ ");
                 }
             }
@@ -252,6 +325,21 @@ fn print_result(action_str: &str, result: Result<Vec<String>, Vec<String>>) {
             print_lines(&errors);
         }
     }
+}
+
+/// Prints a rollback output block with a balanced header/footer.
+///
+/// `lines` is raw executor output — one line per step result.
+/// No bullets — these are outcome messages, not step descriptions.
+///
+/// Used for both auto-rollback (ApplyFailedRolledBack)
+/// and manual rollback (RolledBack).
+fn print_rollback_block(lines: &[String]) {
+    let header = "↩ Rollback applied:";
+    let divider = "─".repeat(header.len());
+    println!("{}", header);
+    println!("{}", divider);
+    print_lines(lines);
 }
 
 fn print_lines(items: &[String]) {

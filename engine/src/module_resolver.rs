@@ -17,13 +17,21 @@ pub enum ModuleId {
     // Users,
 }
 
-pub fn resolve(domain: &Domain) -> Result<ModuleId, String> {
-    match domain {
-        // ------------------------------------------------------
-        // #[cfg(feature = "services")]
-        // Without feature flags? `module_resolver` is useless —
-        // just match `Domain` directly in the executor.
-        // ------------------------------------------------------
-        Domain::Services => Ok(ModuleId::Services),
+impl ModuleId {
+    pub fn to_domain(&self) -> Domain {
+        match self {
+            ModuleId::Services => Domain::Services,
+        }
+    }
+
+    pub fn resolve(domain: &Domain) -> Result<ModuleId, String> {
+        match domain {
+            // ------------------------------------------------------
+            // #[cfg(feature = "services")]
+            // Without feature flags? `module_resolver` is useless —
+            // just match `Domain` directly in the executor.
+            // ------------------------------------------------------
+            Domain::Services => Ok(ModuleId::Services),
+        }
     }
 }

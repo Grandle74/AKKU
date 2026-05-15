@@ -7,18 +7,29 @@
 //   2. Call the engine with a well-formed Order.
 //   3. Resolve the engine's result into an IntentOutcome based on the run mode.
 //   4. Forward approval decisions back to the engine (Trip 2).
+//   5. Trigger auto-rollback when the user approves and execution fails (Normal path only).
+//   6. Expose rollback_intent for future manual rollback from the CLI History flow.
 //
-// The API does NOT execute systemctl commands and does NOT build Steps.
+// The API does NOT execute systemctl commands, does NOT build Steps,
+// and does NOT persist plans — the engine handles that in execute_order.
 // It also does NOT render output — that is the CLI's job.
+//
+// Rollback architecture:
+//   Auto-rollback  — triggered HERE when approve_intent detects execution failure.
+//                    Normal path only. --force fails and leaves state as-is,
+//                    so the user can manually rollback later via History.
+//   Manual rollback — triggered by rollback_intent(), called by the CLI after
+//                     the user picks a plan from History. Not yet wired in the
+//                     CLI (History is not implemented), but the full path exists.
 
+pub use engine::PropertyValue;
 use engine::{Domain, Order, approve_plan as engine_approve, execute_order};
-pub use engine::{Plan, PropertyValue};
 use std::collections::HashMap;
 
 mod service_validator;
 
 pub use engine::Action;
-pub use engine::EngineResult as IntentResult;
+use engine::EngineResult;
 
 // ── Public Types ──────────────────────────────────────────────────────────────
 
@@ -26,18 +37,52 @@ pub use engine::EngineResult as IntentResult;
 pub enum IntentOutcome {
     /// Action completed immediately — display the output lines.
     Immediate(Vec<String>),
+
     /// Dry-run: plan was generated but nothing was saved or executed.
     DryRun { plan_text: Vec<String> },
+
     /// Normal flow: plan saved, awaiting explicit user approval.
-    RequiresApproval { plan: Plan, plan_text: Vec<String> },
-    /// Force flow: plan was auto-approved and executed successfully.
-    AutoApplied {
-        plan_text: Vec<String>,
+    RequiresApproval { plan_id: String },
+
+    /// Plan was approved (auto or manual) and executed successfully.
+    Applied {
+        plan_id: String,
         result_text: Vec<String>,
     },
-    /// Force flow: plan was auto-approved but execution failed.
+
+    /// Execution failed. --force only — state left as-is for manual rollback.
     ApplyFailed {
-        plan_text: Vec<String>,
+        plan_id: String,
+        exec_errors: Vec<String>,
+    },
+
+    /// User-approved execution failed and auto-rollback restored previous state.
+    ///
+    /// No plan_text — the CLI already rendered the plan before the approval prompt.
+    /// rollback_text is raw executor output; the CLI owns the rollback header.
+    ApplyFailedRolledBack {
+        exec_errors: Vec<String>,
+        rollback_text: Vec<String>,
+    },
+
+    /// User-approved execution failed and auto-rollback also failed.
+    ///
+    /// No plan_text — same reason as ApplyFailedRolledBack.
+    ApplyFailedRollbackFailed {
+        exec_errors: Vec<String>,
+        rollback_errors: Vec<String>,
+    },
+
+    /// Manual rollback completed successfully.
+    /// rollback_text is raw executor output; the CLI owns the rollback plan header.
+    RolledBack {
+        origin_plan_id: String,
+        rollback_text: Vec<String>,
+    },
+
+    /// Manual rollback itself failed.
+    RollbackFailed {
+        origin_plan_id: String,
         errors: Vec<String>,
     },
 }
@@ -64,6 +109,7 @@ pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<Strin
                 action,
                 target: None,
                 desired_properties: HashMap::new(),
+                mode: None,
             })?;
             Ok(result.output)
         }
@@ -83,15 +129,21 @@ pub fn process_tri_intent(
     let action = Action::from(action_str.as_str());
     let domain = validate_request(domain_str, &action, &properties)?;
 
+    let is_config = matches!(action, Action::Config);
     let result = execute_order(Order {
         domain,
-        action: action.clone(),
+        action,
         target: Some(target),
         desired_properties: properties,
+        mode: match (is_config, mode) {
+            (true, RunMode::Normal) => Some("normal".to_string()),
+            (true, RunMode::Force) => Some("force".to_string()),
+            _ => None, // DryRun or non-Config: don't save
+        },
     })?;
 
     // Non-Config actions always execute immediately — the engine returns no plan.
-    if !matches!(action, Action::Config) {
+    if !is_config {
         return Ok(IntentOutcome::Immediate(result.output));
     }
 
@@ -99,8 +151,38 @@ pub fn process_tri_intent(
 }
 
 /// Trip 2: forwards a user's approval decision to the engine.
-pub fn approve_intent(plan: Plan, approved: bool) -> Result<Vec<String>, Vec<String>> {
-    engine_approve(plan, approved)
+///
+/// On execution failure the API — not the engine — decides to roll back.
+/// Auto-rollback is the Normal path's safety net. --force has no auto-rollback
+/// by design: the user asserted control, the snapshot is on disk, History will
+/// let them undo manually.
+///
+/// Returns Ok with success lines on approval + successful execution,
+/// or Ok with "Plan rejected." on rejection (not an error — user chose this),
+/// or Err(IntentOutcome) on execution failure so the CLI can render the
+/// correct structured outcome without any string-parsing on its end.
+pub fn approve_intent(id: &str, approved: bool) -> IntentOutcome {
+    if !approved {
+        let _ = engine_approve(id, false);
+        return IntentOutcome::Immediate(vec!["Plan rejected.".to_string()]);
+    }
+    match engine_approve(id, true) {
+        Ok(output) => IntentOutcome::Immediate(output),
+        Err(exec_errors) => build_rollback_outcome(id, exec_errors),
+    }
+}
+
+/// Preview-only rollback: generates and saves the rollback plan without executing it.
+///
+/// Called by the History TUI on the first Enter. The returned Plan is displayed
+/// to the user in the popup, then passed to `approve_intent` on confirmation.
+/// This gives the user a chance to see exactly what will be restored before committing.
+pub fn preview_rollback_intent(origin_plan_id: &str) -> Result<(String, Vec<String>), Vec<String>> {
+    engine::preview_rollback_plan(origin_plan_id)
+}
+
+pub fn read_plan(id: &str) -> Result<Vec<String>, String> {
+    engine::read_plan(id)
 }
 
 // ── Internal Helpers ──────────────────────────────────────────────────────────
@@ -136,44 +218,51 @@ fn validate_request(
 ///
 /// Called only for Config actions. By the time we reach here, the engine has
 /// already confirmed there is work to do (plan is Some) or not (plan is None).
-fn resolve_outcome(result: IntentResult, mode: &RunMode) -> Result<IntentOutcome, Vec<String>> {
+fn resolve_outcome(result: EngineResult, mode: &RunMode) -> Result<IntentOutcome, Vec<String>> {
     let plan_text = result.output;
 
     // Engine returned None: the service is already at desired state.
-    let Some(plan) = result.pending_plan else {
+    let Some(plan_id) = result.pending_plan else {
         return Ok(IntentOutcome::Immediate(plan_text));
     };
 
     match mode {
         RunMode::DryRun => Ok(IntentOutcome::DryRun { plan_text }),
 
-        RunMode::Force => {
-            save_plan(&plan)?;
-            match approve_intent(plan, true) {
-                Ok(result_text) => Ok(IntentOutcome::AutoApplied {
-                    plan_text,
-                    result_text,
-                }),
-                Err(errors) => Ok(IntentOutcome::ApplyFailed { plan_text, errors }),
-            }
-        }
+        // No auto-rollback on --force. The snapshot is on disk; if execution
+        // fails, the user decides what to do next via History.
+        RunMode::Force => match engine_approve(&plan_id, true) {
+            Ok(result_text) => Ok(IntentOutcome::Applied {
+                plan_id,
+                result_text,
+            }),
+            Err(exec_errors) => Ok(IntentOutcome::ApplyFailed {
+                plan_id,
+                exec_errors,
+            }),
+        },
 
-        RunMode::Normal => {
-            // Save before returning to the frontend — guarantees an audit record
-            // exists even if the process is killed during the approval window.
-            save_plan(&plan)?;
-            Ok(IntentOutcome::RequiresApproval { plan, plan_text })
-        }
+        RunMode::Normal => Ok(IntentOutcome::RequiresApproval { plan_id }),
     }
 }
 
-/// Persists the plan via the engine's public surface.
+/// Attempts auto-rollback after a user-approved execution failure and returns
+/// the appropriate structured outcome.
 ///
-/// The API never touches plan_store directly — that is a private engine
-/// implementation detail. Extracted as a helper to avoid repeating the
-/// map_err pattern for both Force and Normal paths.
-fn save_plan(plan: &Plan) -> Result<(), Vec<String>> {
-    engine::save_plan(plan).map_err(|e| vec![e])
+/// Only called by approve_intent — never by the Force path.
+/// plan_text is intentionally NOT threaded through — the CLI already rendered
+/// the plan before the approval prompt, so including it would cause a double-print.
+fn build_rollback_outcome(plan_id: &str, exec_errors: Vec<String>) -> IntentOutcome {
+    match engine_approve(&plan_id, true) {
+        Ok(rollback_text) => IntentOutcome::ApplyFailedRolledBack {
+            exec_errors,
+            rollback_text,
+        },
+        Err(rollback_errors) => IntentOutcome::ApplyFailedRollbackFailed {
+            exec_errors,
+            rollback_errors,
+        },
+    }
 }
 
 fn validate_conflicts(

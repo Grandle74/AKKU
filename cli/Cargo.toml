@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 api = { path = "../api" }
 rustyline = "18.0.0"
+crossterm = "0.29.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
