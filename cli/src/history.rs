@@ -72,7 +72,7 @@ struct PlanEntry {
 
 /// Launches the history TUI. Called by `main` when the user types `history`.
 ///
-/// Exits cleanly on Esc, Ctrl-C, or after a rollback completes.
+/// Exits cleanly on Esc, Ctrl-C.
 /// All errors that would crash the TUI are surfaced as plain text instead —
 /// the terminal is always restored before returning.
 pub fn show_history() {
@@ -221,7 +221,6 @@ fn handle_enter(state: &mut TuiState) {
     if state.showing_popup {
         state.showing_popup = false;
 
-        // Bug 1 fix: single .take() — consume once, use the value.
         let (plan_id, _) = match state.pending_rollback_plan.take() {
             Some(p) => p,
             None => {
@@ -251,7 +250,7 @@ fn handle_enter(state: &mut TuiState) {
             }
         }
 
-        // Bug 2 fix: reload on approval, same as the Esc/rejection path.
+        // reload on approval.
         if let Ok(fresh) = load_entries() {
             if state.selected >= fresh.len() {
                 state.selected = fresh.len().saturating_sub(1);
@@ -550,6 +549,7 @@ fn build_detail(state: &TuiState, width: usize) -> Vec<String> {
 ///   ├─────────────────────────────────────────────────┤
 ///   │        [ Enter: Apply ]   [ Esc: Cancel ]       │
 ///   ╰─────────────────────────────────────────────────╯
+
 fn draw_popup(
     stdout: &mut impl Write,
     state: &TuiState,
@@ -582,8 +582,18 @@ fn draw_popup(
 
     body.push((format!("  {}", sep), Color::DarkGrey));
 
-    if let Some(warn) = conflict_warning(&state.entries, state.selected) {
-        body.push((format!("  ⚠  {}", warn), Color::Yellow));
+    match api::plans_after_touching_target(&entry.id) {
+        Ok(0) => {}
+        Ok(count) => body.push((
+            format!(
+                "  ⚠  {} later completed plan{} also touched '{}'",
+                count,
+                if count == 1 { "" } else { "s" },
+                entry.target
+            ),
+            Color::Yellow,
+        )),
+        Err(e) => body.push((format!("  {}", e), Color::DarkGrey)),
     }
 
     // ── Size the box ─────────────────────────────────────────────────────────
@@ -729,37 +739,6 @@ fn draw_footer(
     queue!(stdout, ResetColor).map_err(|e| e.to_string())
 }
 
-// ── Conflict detection ────────────────────────────────────────────────────────
-
-/// Returns a warning string if any plan *after* the selected one in the
-/// sorted list also completed changes on the same target.
-///
-/// "After" is defined by position in the sorted list (newest-last),
-/// meaning all entries with a higher index than `selected`.
-///
-/// Returns None when it is safe to proceed without a warning.
-fn conflict_warning(entries: &[PlanEntry], selected: usize) -> Option<String> {
-    let target = &entries[selected].target;
-
-    let conflicts: Vec<&str> = entries[selected + 1..]
-        .iter()
-        .filter(|e| e.target == *target && e.status == "completed")
-        .map(|e| e.id.as_str())
-        .collect();
-
-    if conflicts.is_empty() {
-        return None;
-    }
-
-    let count = conflicts.len();
-    Some(format!(
-        "{} later completed plan{} also touched '{}'",
-        count,
-        if count == 1 { "" } else { "s" },
-        target
-    ))
-}
-
 // ── Data loading ──────────────────────────────────────────────────────────────
 
 /// Reads all plan files from disk, parses them, and returns them sorted
@@ -770,7 +749,7 @@ fn load_entries() -> Result<Vec<PlanEntry>, String> {
 
 /// Converts a raw StoredPlan into the display model used by the TUI.
 fn to_entry(p: Plan) -> PlanEntry {
-    let date = date_from_id(&p.id);
+    let date = api::date_from_id(&p.id);
     let summary = build_summary(&p);
     let steps = p
         .steps
@@ -789,37 +768,6 @@ fn to_entry(p: Plan) -> PlanEntry {
         steps,
         rollback_of: p.rollback_of,
         mode: p.mode,
-    }
-}
-
-// ── ID parsing ────────────────────────────────────────────────────────────────
-
-/// Extracts the human-readable date portion from a plan ID.
-///
-/// ID format: `<prefix>_<YYYYMMDD>_<HHMMSS>_<hex>`
-/// Example:   `svc_20260407_143022_a3f2`  →  `2026-04-07 14:30`
-fn date_from_id(id: &str) -> String {
-    let parts: Vec<&str> = id.split('_').collect();
-
-    // A well-formed ID has at least 4 segments: prefix, date, time, hex.
-    if parts.len() < 4 {
-        return id.to_string();
-    }
-
-    let date = parts[1]; // YYYYMMDD
-    let time = parts[2]; // HHMMSS
-
-    if date.len() == 8 && time.len() == 6 {
-        format!(
-            "{}-{}-{} {}:{}",
-            &date[0..4],
-            &date[4..6],
-            &date[6..8],
-            &time[0..2],
-            &time[2..4],
-        )
-    } else {
-        id.to_string()
     }
 }
 
