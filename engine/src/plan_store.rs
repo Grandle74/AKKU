@@ -42,8 +42,7 @@ fn plan_path(id: &str) -> PathBuf {
 /// Steps are written in a flat format for readability and future tooling.
 pub(crate) fn save(plan: &Plan) -> Result<(), String> {
     fs::create_dir_all(plans_dir()).map_err(|e| e.to_string())?;
-    let mut data = serde_json::to_value(plan).map_err(|e| e.to_string())?;
-    data["status"] = serde_json::json!("pending");
+    let data = serde_json::to_value(plan).map_err(|e| e.to_string())?;
     fs::write(
         plan_path(&plan.id),
         serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?,
@@ -104,4 +103,21 @@ pub(crate) fn update_step_status(
         serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())
+}
+pub(crate) fn list_all() -> Result<Vec<Plan>, String> {
+    let dir = plans_dir();
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+    let mut plans: Vec<Plan> = fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
+        .filter_map(|e| {
+            let content = fs::read_to_string(e.path()).ok()?;
+            serde_json::from_str(&content).ok()
+        })
+        .collect();
+    plans.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(plans)
 }

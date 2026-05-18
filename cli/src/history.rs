@@ -8,7 +8,7 @@
 //   ┌─ History ─────────────────────────────────────────────────────────┐
 //   │ [left ~1/3]          │ [right ~2/3]                               │
 //   │  scrollable list     │  selected plan detail                      │
-//   │  ↑/↓ to navigate    │                                            │
+//   │  ↑/↓ to navigate     │                                            │
 //   │  Enter to rollback   │                                            │
 //   │  Esc to exit         │                                            │
 //   └──────────────────────┴────────────────────────────────────────────┘
@@ -29,7 +29,7 @@
 // This module has zero rollback logic of its own — it is display and
 // routing only. All state transitions live in the API and engine layers.
 
-use api::{IntentOutcome, approve_intent, preview_rollback_intent};
+use api::{IntentOutcome, Plan, approve_intent, list_plans, preview_rollback_intent};
 
 use crossterm::{
     cursor,
@@ -38,43 +38,8 @@ use crossterm::{
     style::{self, Color, Print, ResetColor, SetForegroundColor},
     terminal::{self, ClearType},
 };
-use serde::Deserialize;
-use std::{
-    fs,
-    io::{self, Write},
-    path::PathBuf,
-};
 
-// ── Plan file schema (read-only mirror of plan_store's format) ────────────────
-
-/// A step as recorded in the plan file.
-/// `status` is written by the executor after each step runs —
-/// absent on pending plans, present once execution begins.
-#[derive(Deserialize)]
-struct StoredStep {
-    action: serde_json::Value,
-    #[serde(rename = "target")]
-    _target: String,
-    description: String,
-    status: Option<String>,
-}
-
-/// A plan file as written by plan_store — only the fields history needs.
-#[derive(Deserialize)]
-struct StoredPlan {
-    id: String,
-    target: String,
-    status: String,
-
-    #[serde(default)]
-    steps: Vec<StoredStep>,
-
-    #[serde(default)]
-    rollback_of: Option<String>,
-
-    #[serde(default)]
-    mode: Option<String>,
-}
+use std::io::{self, Write};
 
 // ── Display model ─────────────────────────────────────────────────────────────
 
@@ -107,7 +72,7 @@ struct PlanEntry {
 
 /// Launches the history TUI. Called by `main` when the user types `history`.
 ///
-/// Exits cleanly on Esc, Ctrl-C, or after a rollback completes.
+/// Exits cleanly on Esc, Ctrl-C.
 /// All errors that would crash the TUI are surfaced as plain text instead —
 /// the terminal is always restored before returning.
 pub fn show_history() {
@@ -256,7 +221,6 @@ fn handle_enter(state: &mut TuiState) {
     if state.showing_popup {
         state.showing_popup = false;
 
-        // Bug 1 fix: single .take() — consume once, use the value.
         let (plan_id, _) = match state.pending_rollback_plan.take() {
             Some(p) => p,
             None => {
@@ -286,7 +250,7 @@ fn handle_enter(state: &mut TuiState) {
             }
         }
 
-        // Bug 2 fix: reload on approval, same as the Esc/rejection path.
+        // reload on approval.
         if let Ok(fresh) = load_entries() {
             if state.selected >= fresh.len() {
                 state.selected = fresh.len().saturating_sub(1);
@@ -581,10 +545,11 @@ fn build_detail(state: &TuiState, width: usize) -> Vec<String> {
 ///   │    • enable nginx                               │
 ///   │    • start nginx                                │
 ///   │  ─────────────────────────────────────────────  │
-///   │  ⚠  1 later completed plan also touched 'nginx' │  (if conflict)
+///   │     1 later completed plan also touched 'nginx' │  (if conflict)
 ///   ├─────────────────────────────────────────────────┤
 ///   │        [ Enter: Apply ]   [ Esc: Cancel ]       │
 ///   ╰─────────────────────────────────────────────────╯
+
 fn draw_popup(
     stdout: &mut impl Write,
     state: &TuiState,
@@ -617,8 +582,18 @@ fn draw_popup(
 
     body.push((format!("  {}", sep), Color::DarkGrey));
 
-    if let Some(warn) = conflict_warning(&state.entries, state.selected) {
-        body.push((format!("  ⚠  {}", warn), Color::Yellow));
+    match api::plans_after_touching_target(&entry.id) {
+        Ok(0) => {}
+        Ok(count) => body.push((
+            format!(
+                "  ⚠  {} later completed plan{} also touched '{}'",
+                count,
+                if count == 1 { "" } else { "s" },
+                entry.target
+            ),
+            Color::Yellow,
+        )),
+        Err(e) => body.push((format!("  {}", e), Color::DarkGrey)),
     }
 
     // ── Size the box ─────────────────────────────────────────────────────────
@@ -764,73 +739,17 @@ fn draw_footer(
     queue!(stdout, ResetColor).map_err(|e| e.to_string())
 }
 
-// ── Conflict detection ────────────────────────────────────────────────────────
-
-/// Returns a warning string if any plan *after* the selected one in the
-/// sorted list also completed changes on the same target.
-///
-/// "After" is defined by position in the sorted list (newest-last),
-/// meaning all entries with a higher index than `selected`.
-///
-/// Returns None when it is safe to proceed without a warning.
-fn conflict_warning(entries: &[PlanEntry], selected: usize) -> Option<String> {
-    let target = &entries[selected].target;
-
-    let conflicts: Vec<&str> = entries[selected + 1..]
-        .iter()
-        .filter(|e| e.target == *target && e.status == "completed")
-        .map(|e| e.id.as_str())
-        .collect();
-
-    if conflicts.is_empty() {
-        return None;
-    }
-
-    let count = conflicts.len();
-    Some(format!(
-        "{} later completed plan{} also touched '{}'",
-        count,
-        if count == 1 { "" } else { "s" },
-        target
-    ))
-}
-
 // ── Data loading ──────────────────────────────────────────────────────────────
 
 /// Reads all plan files from disk, parses them, and returns them sorted
 /// oldest-first (ascending by ID, which encodes the creation timestamp).
 fn load_entries() -> Result<Vec<PlanEntry>, String> {
-    let dir = plans_dir();
-
-    if !dir.exists() {
-        return Ok(vec![]);
-    }
-
-    let mut entries: Vec<PlanEntry> = fs::read_dir(&dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
-        .filter_map(|e| {
-            let content = fs::read_to_string(e.path()).ok()?;
-            let stored: StoredPlan = serde_json::from_str(&content).ok()?;
-            Some(to_entry(stored))
-        })
-        .collect();
-
-    // IDs are lexicographically sortable by timestamp — no date parsing needed.
-    entries.sort_by(|a, b| a.id.cmp(&b.id));
-
-    Ok(entries)
-}
-
-fn plans_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".akku").join("plans")
+    Ok(list_plans()?.into_iter().map(to_entry).collect())
 }
 
 /// Converts a raw StoredPlan into the display model used by the TUI.
-fn to_entry(p: StoredPlan) -> PlanEntry {
-    let date = date_from_id(&p.id);
+fn to_entry(p: Plan) -> PlanEntry {
+    let date = api::date_from_id(&p.id);
     let summary = build_summary(&p);
     let steps = p
         .steps
@@ -840,7 +759,6 @@ fn to_entry(p: StoredPlan) -> PlanEntry {
             status: s.status,
         })
         .collect();
-
     PlanEntry {
         id: p.id,
         target: p.target,
@@ -853,45 +771,7 @@ fn to_entry(p: StoredPlan) -> PlanEntry {
     }
 }
 
-// ── ID parsing ────────────────────────────────────────────────────────────────
-
-/// Extracts the human-readable date portion from a plan ID.
-///
-/// ID format: `<prefix>_<YYYYMMDD>_<HHMMSS>_<hex>`
-/// Example:   `svc_20260407_143022_a3f2`  →  `2026-04-07 14:30`
-fn date_from_id(id: &str) -> String {
-    let parts: Vec<&str> = id.split('_').collect();
-
-    // A well-formed ID has at least 4 segments: prefix, date, time, hex.
-    if parts.len() < 4 {
-        return id.to_string();
-    }
-
-    let date = parts[1]; // YYYYMMDD
-    let time = parts[2]; // HHMMSS
-
-    if date.len() == 8 && time.len() == 6 {
-        format!(
-            "{}-{}-{} {}:{}",
-            &date[0..4],
-            &date[4..6],
-            &date[6..8],
-            &time[0..2],
-            &time[2..4],
-        )
-    } else {
-        id.to_string()
-    }
-}
-
 // ── Summary generation ────────────────────────────────────────────────────────
-
-fn action_name(v: &serde_json::Value) -> &str {
-    v.as_object()
-        .and_then(|o| o.values().next())
-        .and_then(|v| v.as_str())
-        .unwrap_or("?")
-}
 
 /// Builds a one-line human-readable action summary from a plan's steps.
 ///
@@ -900,7 +780,7 @@ fn action_name(v: &serde_json::Value) -> &str {
 ///   "enable, start nginx"          (2 steps, same target)
 ///   "unmask, enable, start nginx"  (3 steps)
 ///   "rolled back svc_20260407_..."  (rollback plan)
-fn build_summary(plan: &StoredPlan) -> String {
+fn build_summary(plan: &Plan) -> String {
     if let Some(origin) = &plan.rollback_of {
         return format!("rolled back {}", origin);
     }
@@ -914,7 +794,7 @@ fn build_summary(plan: &StoredPlan) -> String {
     let actions: Vec<&str> = plan
         .steps
         .iter()
-        .map(|s| action_name(&s.action))
+        .map(|s| s.action.as_str())
         .filter(|a| seen.insert(*a))
         .collect();
 

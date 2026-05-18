@@ -22,6 +22,7 @@
 //                     the user picks a plan from History. Not yet wired in the
 //                     CLI (History is not implemented), but the full path exists.
 
+pub use engine::Plan;
 pub use engine::PropertyValue;
 use engine::{Domain, Order, approve_plan as engine_approve, execute_order};
 use std::collections::HashMap;
@@ -279,4 +280,62 @@ fn parse_domain(s: &str) -> Result<Domain, String> {
         "service" | "services" | "srv" => Ok(Domain::Services),
         _ => Err(format!("Unknown module '{}' — available: services", s)),
     }
+}
+
+pub fn list_plans() -> Result<Vec<Plan>, String> {
+    engine::list_plans()
+}
+
+// ── ID parsing ────────────────────────────────────────────────────────────────
+
+/// Extracts the human-readable date portion from a plan ID.
+///
+/// ID format: `<prefix>_<YYYYMMDD>_<HHMMSS>_<hex>`
+/// Example:   `svc_20260407_143022_a3f2`  →  `2026-04-07 14:30`
+pub fn date_from_id(id: &str) -> String {
+    let parts: Vec<&str> = id.split('_').collect();
+
+    // A well-formed ID has at least 4 segments: prefix, date, time, hex.
+    if parts.len() < 4 {
+        return id.to_string();
+    }
+
+    let date = parts[1]; // YYYYMMDD
+    let time = parts[2]; // HHMMSS
+
+    if date.len() == 8 && time.len() == 6 {
+        format!(
+            "{}-{}-{} {}:{}",
+            &date[0..4],
+            &date[4..6],
+            &date[6..8],
+            &time[0..2],
+            &time[2..4],
+        )
+    } else {
+        id.to_string()
+    }
+}
+
+// ── Touched targets ────────────────────────────────────────────────────────
+
+/// Returns a warning string if any plan *after* the selected one in the
+/// sorted list also completed changes on the same target.
+///
+/// "After" is defined by position in the sorted list (newest-last),
+/// meaning all entries with a higher index than `selected`.
+///
+/// Returns None when it is safe to proceed without a warning.
+pub fn plans_after_touching_target(plan_id: &str) -> Result<usize, String> {
+    let plans = engine::list_plans()?;
+    let pos = plans
+        .iter()
+        .position(|p| p.id == plan_id)
+        .ok_or_else(|| format!("Plan '{}' not found", plan_id))?;
+    let target = &plans[pos].target;
+    let count = plans[pos + 1..]
+        .iter()
+        .filter(|p| p.target == *target && p.status == "completed")
+        .count();
+    Ok(count)
 }
