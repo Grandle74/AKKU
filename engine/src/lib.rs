@@ -1,15 +1,13 @@
 // engine/src/lib.rs
 //
-// Engine entry points: the two trips of the Plan/approve flow.
+// Engine entry points: the two trips of the plan/approve flow.
 //
-// Trip 1 — `execute_order`: dispatches an Order.
-//   - Meta/Custom actions execute immediately and return output.
-//   - Config actions plan and return the Plan for the API to handle.
-//     The engine has no opinion on dry-run vs force vs normal — that is
-//     the API layer's concern. The engine ALWAYS returns the plan.
+// Does NOT own approval logic, run-mode semantics, or frontend rendering —
+// those belong to the API layer and Frontend respectively.
 //
-// Trip 2 — `approve_plan`: acts on a user's yes/no decision.
-//   Executes or rejects the plan and updates the audit file.
+// Invariant: all engine internals (planner, executor, plan_store, snapshot,
+// module_resolver) communicate only through this file — never directly
+// with each other.
 
 pub use shared_libs::{Action, Domain, PropertyValue};
 use std::collections::HashMap;
@@ -24,25 +22,25 @@ use planner::Plan;
 
 // ── Core Types ────────────────────────────────────────────────────────────────
 
-/// Describes an operation to perform, as assembled by the API from parsed intent.
+/// Describes an operation to perform, assembled by the API from parsed intent.
 #[derive(Debug, Clone)]
 pub struct Order {
     pub domain: Domain,
     pub action: Action,
-    /// Present for all actions except Meta. Required for Config (it is the plan target).
+    /// Present for all actions except Meta. Required for Config & Custom — it is the plan target.
     pub target: Option<String>,
     /// Non-empty only for Config actions. Ignored by Meta/Custom dispatchers.
     pub desired_properties: HashMap<String, PropertyValue>,
-    /// Set by the API to "normal", "force", or "rollback". None means dry-run — do not save.
+    /// Set by the API: "normal" or "force". None means dry-run — do not save.
     pub mode: Option<String>,
 }
 
 /// Returned by `execute_order` for every action.
 ///
-/// `pending_plan` is `Some` only for Config actions with at least one step —
-/// the frontend must send it back via `approve_plan()` after the user confirms.
-/// `None` means either the action was not declarative, or the service is already
-/// at the desired state (no steps needed).
+/// `pending_plan` is `Some` only for Config actions with at least one step.
+/// The frontend must send the plan ID back via `approve_plan` after the user confirms.
+/// `None` means either the action was not declarative, or the target is already
+/// at the desired state.
 pub struct EngineResult {
     pub output: Vec<String>,
     pub pending_plan: Option<String>,
@@ -50,12 +48,11 @@ pub struct EngineResult {
 
 // ── Trip 1 ────────────────────────────────────────────────────────────────────
 
-/// Processes an Order and returns a result or a plan requiring approval.
+/// Dispatches an Order and returns output or a plan awaiting approval.
 ///
-/// The engine does not know about run modes (dry-run, force, normal).
-/// That distinction is the API layer's responsibility. The engine always
-/// returns the Plan when one is created — what the API does with it is
-/// the API's concern.
+/// The engine does not distinguish run modes (dry-run, force, normal) —
+/// that is the API's responsibility. The engine always returns the plan ID +
+/// plan output when a plan is created; what the API does with it is the API's concern.
 pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
     let module = module_resolver::ModuleId::resolve(&order.domain).map_err(|e| vec![e])?;
 
@@ -65,7 +62,7 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
 
             match maybe_plan {
                 None => {
-                    // Already at desired state — no plan, no approval needed.
+                    // Target is already at desired state — nothing to approve.
                     let msg = format!(
                         "✔ '{}' is already in the desired state — no changes needed.",
                         order.target.as_deref().unwrap_or("target")
@@ -76,15 +73,13 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
                     })
                 }
                 Some(mut plan) => {
-                    // Save to disk when a mode is set. None means dry-run — no audit record.
+                    // None mode means dry-run — produce the plan display but leave no audit record.
                     if let Some(ref mode) = order.mode {
                         plan.mode = Some(mode.clone());
                         plan_store::save(&plan).map_err(|e| vec![e])?;
                     }
-                    // Hand the plan's display lines to the frontend as-is.
-                    // The frontend decides how to render them.
-                    let output = plan.output.clone();
-                    let plan_id = plan.id.clone();
+                    let output = plan.output;
+                    let plan_id = plan.id;
                     Ok(EngineResult {
                         output,
                         pending_plan: Some(plan_id),
@@ -94,7 +89,7 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
         }
 
         _ => {
-            // Meta and Custom actions execute immediately — no planning, no approval.
+            // Meta and Custom actions execute immediately — no planning, no approval needed.
             let output = executor::execute_normal(&order, &module).map_err(|e| vec![e])?;
             Ok(EngineResult {
                 output,
@@ -104,13 +99,13 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
     }
 }
 
-// ── Trip 2 (Normal) ───────────────────────────────────────────────────────────────────
+// ── Trip 2 ────────────────────────────────────────────────────────────────────
 
-/// Acts on a user's approval or rejection of a pending Plan.
+/// Acts on a user's approval or rejection of a pending plan.
 ///
-/// Takes the in-memory Plan that was returned from `execute_order` —
-/// no file reload is needed for execution. The plan file (written by
-/// `execute_order` before returning) is only updated here for audit-trail purposes.
+/// The plan file written by `execute_order` is reloaded from disk here —
+/// the in-memory plan from Trip 1 is gone by the time the user confirms.
+/// The file is the handoff mechanism between the two trips.
 pub fn approve_plan(id: &str, approved: bool) -> Result<Vec<String>, Vec<String>> {
     if !approved {
         let _ = plan_store::update_status(id, "rejected");
@@ -119,6 +114,10 @@ pub fn approve_plan(id: &str, approved: bool) -> Result<Vec<String>, Vec<String>
 
     let plan = plan_store::load(id).map_err(|e| vec![e])?;
 
+    // Rollback plans skip snapshot capture — capturing state here would overwrite
+    // the pre-change snapshot with the post-change state, defeating restoration.
+    // A failed snapshot saving aborts rather than warns; a plan
+    // with no rollback anchor must not execute.
     if plan.rollback_of.is_none()
         && let Err(e) = snapshot::save(&plan.id, &plan.module_id.to_domain(), &plan.target)
     {
@@ -142,14 +141,13 @@ pub fn approve_plan(id: &str, approved: bool) -> Result<Vec<String>, Vec<String>
     result
 }
 
-// ── Direct Trip (Rollback) ─────────────────────────────────────────────────────────
+// ── Rollback Path ─────────────────────────────────────────────────────────────
 
-/// Generates a rollback plan from a snapshot and saves it to disk,
-/// but does NOT execute it.
+/// Builds a rollback plan from a snapshot and saves it to disk without executing it.
 ///
-/// Called by the History TUI to show the user what will be restored
-/// before they confirm. The returned Plan is passed to `approve_plan`
-/// on the user's second Enter.
+/// Returns the plan ID and step descriptions for the caller to present before
+/// confirmation. The caller then passes the ID to `approve_plan` — this keeps
+/// the rollback on the standard approval path rather than a separate execution route.
 pub fn preview_rollback_plan(origin_plan_id: &str) -> Result<(String, Vec<String>), Vec<String>> {
     let snapshot = snapshot::load(origin_plan_id).map_err(|e| vec![e])?;
     let order = snapshot.into_order().map_err(|e| vec![e])?;
@@ -168,13 +166,11 @@ pub fn preview_rollback_plan(origin_plan_id: &str) -> Result<(String, Vec<String
     Ok((plan.id, descriptions))
 }
 
-/// Restores a target to its pre-execution state by loading the snapshot
-/// captured before the original plan ran.
+/// Reconstructs display lines for a saved plan from its persisted steps.
 ///
-/// Executes immediately without user approval — mirrors --force behavior.
-/// No snapshot is taken before this execution (rollback_of is Some).
-/// Used by the auto-rollback path only — the History TUI uses
-/// preview_rollback_plan + approve_plan instead.
+/// Not used by the in-session approval flow — that caller already holds
+/// the output from `EngineResult`. This path exists for out-of-session
+/// callers that need to display a past plan without a prior Trip 1.
 pub fn read_plan(id: &str) -> Result<Vec<String>, String> {
     plan_store::read(id)
 }

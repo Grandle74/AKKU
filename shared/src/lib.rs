@@ -8,7 +8,7 @@
 // Zero internal dependencies: only std and serde. All other crates depend on
 // this one; it must never depend on them.
 
-// ── Core Intent Types ─────────────────────────────────────────────────────────
+// ── Domain & Action Types ─────────────────────────────────────────────────────
 
 /// The system domain an Order targets.
 ///
@@ -65,12 +65,12 @@ impl From<&str> for Action {
     }
 }
 
-// ── Shared Engine / Module Types ──────────────────────────────────────────────
+// ── Property Types ────────────────────────────────────────────────────────────
 
 /// A typed property value used in declarative `Config` orders.
 ///
 /// Keeping this generic means future modules reuse the same property system
-/// without engine changes.
+/// without CORE changes.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum PropertyValue {
     Bool(bool),
