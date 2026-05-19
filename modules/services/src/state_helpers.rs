@@ -9,9 +9,25 @@
 // This file has NO side effects. It only reads from systemctl (via queries)
 // and produces data structures. The executor runs the Steps.
 
-use shared_libs::{Delta, Domain, PropertyValue, Step, Steps};
+use shared_libs::{Domain, PropertyValue, Step, Steps};
 use std::collections::HashMap;
 use std::process::Command;
+
+/// Diff between a service's current state and its desired state.
+///
+/// Produced by `state_helpers::calc()`. Each `needs_*` flag corresponds to
+/// one concrete `systemctl` call. Step ordering is fixed in `to_steps()`:
+/// unmask → enable → start / stop → disable → mask — callers must not reorder.
+pub struct Delta {
+    pub target: Option<String>,
+    pub needs_start: bool,
+    pub needs_stop: bool,
+    pub needs_mask: bool,
+    pub needs_unmask: bool,
+    pub needs_enable: bool,
+    pub needs_disable: bool,
+    pub needs_reset_failed: bool,
+}
 
 // ── Current State ────────────────────────────────────────────────────────────
 
