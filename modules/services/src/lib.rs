@@ -2,21 +2,19 @@
 //
 // Public API of the Services module.
 //
-// Each function here is a thin wrapper around one systemctl command.
-// Responsibility: execute the command and return either success lines
-// or a human-readable error string. NO decision logic lives here —
-// that belongs to the engine's planner and executor.
+// Does not own state diffing, step ordering, or any decision about *whether*
+// a command should run — those live in state_helpers and the engine's executor.
 //
-// Error convention: ALL functions return `Result<Vec<String>, String>`.
-// The executor converts these to `Result<Vec<String>, Vec<String>>` when
-// assembling the final EngineResult. Do not deviate from this signature.
+// TODO: This module is a prototype placeholder and will be rewritten before v0.1.
+// The systemctl wrappers and validation layers have known reliability issues
+// across machines. state_helpers.rs is considered stable; the rest is not.
 
 use std::process::{Command, Stdio};
 
 pub mod state_helpers;
 mod systemctl_queries;
 
-// ── Targeted Actions ─────────────────────────────────────────────────────────
+// ── Targeted Actions ──────────────────────────────────────────────────────────
 
 /// Returns raw `systemctl status` output for the named service.
 pub fn status_service(service: &str) -> Result<Vec<String>, String> {
@@ -33,28 +31,25 @@ pub fn status_service(service: &str) -> Result<Vec<String>, String> {
         .collect())
 }
 
-/// Reloads (or restarts if reload is not supported) the named service,
-/// then validates the resulting state.
+/// Reloads the named service, falling back to restart if reload is unsupported.
+///
+/// Does not check the command's exit code — `start_validation` is the
+/// authoritative ground truth for final state. The command's own output is
+/// unreliable for state confirmation.
 pub fn reload_service(service: &str) -> Result<Vec<String>, String> {
     systemctl_queries::validate_service_exists(service).map_err(|e| e.join("\n"))?;
 
-    // `reload-or-restart` is used intentionally — not all services support reload.
-    // We discard stdout/stderr here because `start_validation` will authoritatively
-    // confirm the final state via systemd properties. The command's own output is
-    // unreliable for state confirmation.
     Command::new("sudo")
         .args(["systemctl", "reload-or-restart", service])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .map_err(|e| e.to_string())?;
-    // NOTE: We intentionally do not check `.status.success()` here. The reload
-    // command may exit non-zero even when the service transitions correctly (e.g.
-    // a restart that systemd itself handles). `start_validation` is the ground truth.
 
     systemctl_queries::start_validation(service).map_err(|lines| lines.join("\n"))
 }
 
+/// Starts the named service and validates the resulting state.
 pub fn start_service(service: &str) -> Result<Vec<String>, String> {
     systemctl_queries::validate_service_exists(service).map_err(|e| e.join("\n"))?;
 
@@ -66,6 +61,7 @@ pub fn start_service(service: &str) -> Result<Vec<String>, String> {
     systemctl_queries::start_validation(service).map_err(|lines| lines.join("\n"))
 }
 
+/// Stops the named service and validates the resulting state.
 pub fn stop_service(service: &str) -> Result<Vec<String>, String> {
     systemctl_queries::validate_service_exists(service).map_err(|e| e.join("\n"))?;
 
@@ -77,6 +73,7 @@ pub fn stop_service(service: &str) -> Result<Vec<String>, String> {
     systemctl_queries::stop_validation(service).map_err(|lines| lines.join("\n"))
 }
 
+/// Enables the named service and validates the resulting state.
 pub fn enable_service(service: &str) -> Result<Vec<String>, String> {
     systemctl_queries::validate_service_exists(service).map_err(|e| e.join("\n"))?;
 
@@ -93,6 +90,7 @@ pub fn enable_service(service: &str) -> Result<Vec<String>, String> {
     }
 }
 
+/// Disables the named service and validates the resulting state.
 pub fn disable_service(service: &str) -> Result<Vec<String>, String> {
     systemctl_queries::validate_service_exists(service).map_err(|e| e.join("\n"))?;
 
@@ -109,6 +107,11 @@ pub fn disable_service(service: &str) -> Result<Vec<String>, String> {
     }
 }
 
+/// Masks the named service and validates the resulting state.
+///
+/// systemd writes informational messages to stderr even on success for
+/// mask/unmask — these are collected and appended to the result for
+/// transparency rather than discarded.
 pub fn mask_service(service: &str) -> Result<Vec<String>, String> {
     systemctl_queries::validate_service_exists(service).map_err(|e| e.join("\n"))?;
 
@@ -117,8 +120,6 @@ pub fn mask_service(service: &str) -> Result<Vec<String>, String> {
         .output()
         .map_err(|e| e.to_string())?;
 
-    // systemd writes informational messages to stderr even on success for mask/unmask.
-    // We collect them to include in the result for transparency.
     let stderr_lines: Vec<String> = String::from_utf8_lossy(&output.stderr)
         .trim()
         .lines()
@@ -131,6 +132,9 @@ pub fn mask_service(service: &str) -> Result<Vec<String>, String> {
     Ok(result)
 }
 
+/// Unmasks the named service and validates the resulting state.
+///
+/// See `mask_service` for the stderr collection rationale.
 pub fn unmask_service(service: &str) -> Result<Vec<String>, String> {
     systemctl_queries::validate_service_exists(service).map_err(|e| e.join("\n"))?;
 
@@ -173,6 +177,7 @@ pub struct ServiceEntry {
     pub description: String,
 }
 
+/// Returns all loaded service units as structured entries.
 pub fn list_services() -> Result<Vec<ServiceEntry>, String> {
     let output = Command::new("systemctl")
         .args(["list-units", "--type=service", "--no-pager", "--no-legend"])
@@ -199,7 +204,7 @@ pub fn list_services() -> Result<Vec<ServiceEntry>, String> {
 /// Resets ALL failed services system-wide.
 ///
 /// This is a Meta action only — invoked by `service reset` from the CLI.
-/// Plans never use this; they use `reset_failed_service(target)` instead.
+/// Plans never use this; they call `reset_failed_service(target)` instead.
 pub fn reset_service() -> Result<Vec<String>, String> {
     let failed_output = Command::new("systemctl")
         .args(["list-units", "--failed", "--no-legend", "--plain"])
@@ -226,9 +231,10 @@ pub fn reset_service() -> Result<Vec<String>, String> {
 }
 
 const HELP_TEXT: &str = include_str!("../docs/help.txt");
+
+/// Returns the module help text as a vec of lines, padded with blank lines.
 pub fn help_service() -> Vec<String> {
     let mut lines: Vec<String> = HELP_TEXT.lines().map(|s| s.to_string()).collect();
-
     lines.insert(0, String::new());
     lines.push(String::new());
     lines
