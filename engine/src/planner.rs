@@ -1,11 +1,9 @@
 // engine/src/planner.rs
 //
-// Plan creation: the bridge between an Order and an executable Steps list.
+// Produces an ordered Plan from an Order by diffing current against desired state.
 //
-// Responsibility: given a module and an Order, query current state,
-// diff against desired state, and return an ordered Plan.
-// This file does NOT execute steps and does NOT write to disk —
-// those concerns belong to the executor and plan_store respectively.
+// Does NOT execute steps and does NOT write to disk — those belong to
+// the executor and plan_store respectively.
 
 use crate::{Order, PropertyValue, module_resolver::ModuleId};
 use shared_libs::Steps;
@@ -17,12 +15,11 @@ use std::collections::HashMap;
 ///
 /// `Plan` is a pure data carrier — it does not save itself, update statuses,
 /// or execute anything. All side effects are handled by `plan_store` and
-/// `executor` in the engine layer.
+/// `executor`.
 ///
-/// `output` is skipped during serialization — it is display text assembled
-/// for the current session. Each frontend is responsible for rendering its
-/// own view of the plan steps. The file format uses `steps` as the source
-/// of truth.
+/// `output` is excluded from serialization: it is display text assembled
+/// for the current session. The file format uses `steps` as the source of
+/// truth; frontends rebuild their own view from steps on read.
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Plan {
     pub id: String,
@@ -30,10 +27,12 @@ pub struct Plan {
     pub target: String,
     pub output: Vec<String>,
     pub steps: Steps,
-    /// Execution mode recorded for the audit trail: "normal", "force", or "rollback".
-    /// Set by the API layer before saving; None on freshly planned in-memory plans.
+    /// "normal", "force", or "rollback". None on freshly planned in-memory plans —
+    /// the API layer stamps this before saving.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) mode: Option<String>,
+    /// Set when this plan is itself a rollback. Signals `approve_plan` to skip
+    /// snapshot capture — capturing here would overwrite the pre-change snapshot.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) rollback_of: Option<String>,
 }
@@ -45,10 +44,9 @@ pub struct Plan {
 /// Format:  `<domain_prefix>_<YYYYMMDD>_<HHMMSS>_<4hex>`
 /// Example: `svc_20260407_143022_a3f2`
 ///
-/// The timestamp embedded in the ID is the canonical creation time —
-/// no separate `created_at` field is needed in the plan file.
-/// The hex suffix is derived from sub-second nanoseconds, making
-/// same-second collisions practically impossible without a UUID library.
+/// The timestamp is the canonical creation time — no separate `created_at`
+/// field is needed. The hex suffix is derived from sub-second nanoseconds,
+/// making same-second collisions practically impossible without a UUID library.
 fn generate_id(prefix: &str) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -74,7 +72,7 @@ fn module_prefix(module: &ModuleId) -> &'static str {
 
 /// Builds a Plan for the given Order, or returns `None` if no changes are needed.
 ///
-/// `None` means the service is already at the desired state — the caller
+/// `None` means the target is already at the desired state — the caller
 /// should surface this to the user without creating a plan file.
 pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, String> {
     let target = order.target.as_deref().ok_or("No target provided")?;
@@ -86,8 +84,6 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
         return Ok(None);
     }
 
-    // Header and footer share the same width so the box is balanced regardless
-    // of the target name length. Minimum width of 3 keeps very short names tidy.
     let header = format!("=== Plan for '{}' ===", target);
     let footer = "=".repeat(header.len());
 
