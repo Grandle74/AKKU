@@ -2,7 +2,7 @@
 //
 // Dispatch layer between the engine executor and the services module.
 //
-// Does NOT contain systemctl logic — that belongs in modules/services.
+// Does NOT contain init system logic — that belongs in modules/services.
 // This is the only file in the engine that imports the services crate.
 
 use crate::{Action, Order, Plan};
