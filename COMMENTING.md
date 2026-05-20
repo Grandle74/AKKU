@@ -168,6 +168,31 @@ Comment the surprising arm. Leave the clear ones alone.
 
 ---
 
+## Implementation Specificity
+
+The core layers — shared_libs, engine, API — are implementation-agnostic by
+design. A comment that names a concrete frontend, init system, or tool leaks
+an assumption the code doesn't make. When that implementation changes, the
+comment becomes a lie.
+
+Match the vocabulary the code actually uses.
+
+**Bad:**
+```rust
+// The CLI already rendered the plan before the approval prompt.
+```
+
+**Good:**
+```rust
+// The frontend already rendered the plan before the approval prompt.
+```
+
+**Exception:** modules already scoped to a specific system — a `systemd`
+module, an `openrc` module — may name the concrete tool when the behaviour
+they're explaining is specific to it.
+
+---
+
 ## Section Dividers
 
 Use section dividers to group related items within a file. The format is fixed:
