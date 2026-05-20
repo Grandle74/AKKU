@@ -1,16 +1,16 @@
-# Module Manager — Initial Design Notes
+# Modules Manager — Initial Design Notes
 
-This document captures the current thinking on the Module Manager and Module
+This document captures the current thinking on the Modules Manager and Module
 Bundle design. It is not a spec — details are still open. It exists so the
 idea is not lost between now and implementation.
 
 ---
 
-## Module Manager
+## Modules Manager
 
 Responsible for installing, removing, and managing the presence of modules
 across the system. When a module is installed or removed, both the API and
-the engine are made aware of the change through the Module Manager — neither
+the engine are made aware of the change through the Modules Manager — neither
 layer manages this directly.
 
 ---
@@ -37,7 +37,7 @@ the API never touches execution logic, the engine never touches the validator.
 
 ```
                         ┌─────────────────┐
-                        │  Module Manager │
+                        │ Modules Manager │
                         └────────┬────────┘
                                  │ unpacks bundle
                     ┌────────────┴────────────┐
@@ -65,7 +65,7 @@ the API never touches execution logic, the engine never touches the validator.
 ```
 
 The frontend sends module management intents to the API. The API communicates
-with the Module Manager to act on them.
+with the Modules Manager to act on them.
 
 After installation, the API holds a map of domain → validator. The engine
 holds a map of domain → ModuleID. Each layer queries its own map independently
@@ -76,5 +76,5 @@ holds a map of domain → ModuleID. Each layer queries its own map independently
 ## Open
 
 - The exact interface the API Part must implement is not yet decided.
-- How the Module Manager persists installed module state is not yet decided.
+- How the Modules Manager persists installed module state is not yet decided.
 - Error awareness in the Engine Part is deferred to the module remake.
