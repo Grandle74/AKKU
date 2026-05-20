@@ -274,9 +274,12 @@ fn validate_conflicts(
     }
 }
 
+// Expects the canonical domain name — alias normalisation is the frontend's responsibility.
+// The error is intentionally bare: it has no knowledge of what the frontend looks like
+// or what context is relevant to show the user.
 fn parse_domain(s: &str) -> Result<Domain, String> {
     match s {
-        "service" | "services" | "srv" => Ok(Domain::Services),
-        _ => Err(format!("Unknown module '{}' — available: services", s)),
+        "services" => Ok(Domain::Services),
+        _ => Err(format!("Unknown domain '{}'", s)),
     }
 }

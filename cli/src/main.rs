@@ -81,6 +81,14 @@ fn main() {
 
 // ── Intent Routing ────────────────────────────────────────────────────────────
 
+fn normalise_domain(s: &str) -> &str {
+    match s {
+        "service" | "srv" | "services" => "services",
+        // others => other,
+        _ => s,
+    }
+}
+
 /// Routes a parsed command to the correct API call based on its shape.
 ///
 /// Intent shapes:
@@ -89,7 +97,7 @@ fn main() {
 ///   3 parts → `domain action target`          → tri-intent (Custom only)
 ///   4+ parts→ `domain cfg target key=val ...` → declarative tri-intent (Config only)
 fn handle_intent(parts: &[String], mode: RunMode) {
-    let domain = &parts[0];
+    let domain = normalise_domain(&parts[0]);
 
     println!();
     match parts.len() {
