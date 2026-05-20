@@ -254,7 +254,28 @@ fn resolve_outcome(result: EngineResult, mode: &RunMode) -> Result<IntentOutcome
 /// plan_text is intentionally NOT threaded through — the CLI already rendered
 /// the plan before the approval prompt, so including it would cause a double-print.
 fn build_rollback_outcome(plan_id: &str, exec_errors: Vec<String>) -> IntentOutcome {
-    match engine_approve(&plan_id, true) {
+    // Step 1: generate the rollback plan from the snapshot taken before execution.
+    let rollback_plan_id = match engine::preview_rollback_plan(plan_id) {
+        Err(rollback_errors) => {
+            return IntentOutcome::ApplyFailedRollbackFailed {
+                exec_errors,
+                rollback_errors,
+            };
+        }
+        // Empty id means snapshot delta was zero — nothing to restore.
+        Ok((id, _)) if id.is_empty() => {
+            return IntentOutcome::ApplyFailedRolledBack {
+                exec_errors,
+                rollback_text: vec![
+                    "Nothing to restore — pre-change state matches current state.".to_string(),
+                ],
+            };
+        }
+        Ok((id, _)) => id,
+    };
+
+    // Step 2: execute the rollback plan.
+    match engine_approve(&rollback_plan_id, true) {
         Ok(rollback_text) => IntentOutcome::ApplyFailedRolledBack {
             exec_errors,
             rollback_text,
