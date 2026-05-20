@@ -3,7 +3,7 @@
 // Maps a Domain to the ModuleId the executor uses for dispatch.
 //
 // Does NOT own module installation or the module registry — that belongs
-// to a future module_manager crate, controlled via the API/frontend.
+// to a future modules_manager crate, controlled via the API/frontend.
 // resolve() is where the engine queries the manager: a Domain only
 // dispatches if its module is installed.
 //

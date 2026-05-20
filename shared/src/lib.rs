@@ -57,7 +57,7 @@ impl Action {
 impl From<&str> for Action {
     fn from(s: &str) -> Self {
         match s {
-            "list" | "help" | "reset" => Action::Meta(s.to_string()),
+            "list" | "help" | "clean" => Action::Meta(s.to_string()),
             // Aliases kept narrow deliberately — "config" is the canonical form.
             "config" | "change" | "cfg" => Action::Config,
             _ => Action::Custom(s.to_string()),

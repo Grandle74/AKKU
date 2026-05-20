@@ -31,7 +31,7 @@ pub fn execute_services(order: &Order) -> Result<Vec<String>, String> {
                     .collect())
             }
             "help" => Ok(services::help_service()),
-            "reset" => services::reset_service(),
+            "clean" => services::reset_service(),
             _ => Err(format!("Unknown meta action '{}'", a)),
         },
 
