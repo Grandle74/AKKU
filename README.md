@@ -102,7 +102,7 @@ Track live progress on the [v0.1 Milestone](https://github.com/Grandle74/AKKU/mi
 
 ### v0.1 — Foundations
 - Hardened end-to-end core (API + Engine)
-- Modules Manager — initial design captured in [`ModuleManager.md`](ModuleManager.md)
+- Modules Manager — initial design captured in [`ModulesManager.md`](ModulesManager.md)
 - `systemd` service module reworked as a solid first-party reference
 - A second lightweight module to validate the module system
 - CI setup and minimum supported Rust version pinned
