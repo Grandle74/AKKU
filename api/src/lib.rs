@@ -71,8 +71,6 @@ pub enum IntentOutcome {
     },
 
     /// Manual rollback failed.
-    ///
-    /// `rollback_text` is raw executor output; the frontend owns the rollback plan header.
     RollbackFailed {
         origin_plan_id: String,
         errors: Vec<String>,
@@ -88,7 +86,7 @@ pub enum RunMode {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/// Trip 1, bi-intent path: execute a Meta action (list, help, reset).
+/// Trip 1, bi-intent path: execute a Meta action.
 ///
 /// Rejects any action other than Meta — those must go through `process_tri_intent`.
 pub fn process_bi_intent(domain_str: &str, action_str: &str) -> Result<Vec<String>, Vec<String>> {

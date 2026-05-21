@@ -1,8 +1,12 @@
 // engine/src/executor/services.rs
 //
-// Dispatch layer between the engine executor and the services module.
+// Systemd-specific dispatch between the engine executor and the services module.
 //
-// Does NOT contain init system logic — that belongs in modules/services.
+// Temporary stand-in — when the Module Bundle design is introduced, action
+// dispatch moves into each bundle's engine-side handlers.
+// This file will be removed at that point.
+// See ModulesManager.md.
+//
 // This is the only file in the engine that imports the services crate.
 
 use crate::{Action, Order, Plan};
