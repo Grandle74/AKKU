@@ -7,7 +7,7 @@
 > Declarative system configuration — plan, apply, and rollback across any OS and init system.
  
 ![Status](https://img.shields.io/badge/status-prototype-blue)
-![License](https://img.shields.io/badge/license-GPL--3.0-blue)
+![License](https://img.shields.io/badge/license-LGPL--3.0-blue)
 ![Rust](https://img.shields.io/badge/rust-1.89.0+-orange?logo=rust)
  
 </div>
@@ -125,7 +125,7 @@ Contributing guidelines (including layer contracts and architectural invariants)
 
 ## License
 
-This project is licensed under the [GPL-3.0 License](LICENSE).
+This project is licensed under the [LGPL-3.0 License](LICENSE).
 
 ## Background
 
