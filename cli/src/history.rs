@@ -206,18 +206,6 @@ fn handle_enter(state: &mut TuiState) {
             IntentOutcome::Immediate(lines) => {
                 state.message = Some(lines.first().cloned().unwrap_or_else(|| "✔ Done.".into()));
             }
-            IntentOutcome::RolledBack { .. } => {
-                state.message = Some("✔ Rollback applied.".into());
-            }
-            IntentOutcome::RollbackFailed { errors, .. } => {
-                state.message = Some(format!(
-                    "✗ {}",
-                    errors
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| "Rollback failed.".into())
-                ));
-            }
             _ => {
                 state.message = Some("✗ Unexpected outcome — check system state.".into());
             }
@@ -517,7 +505,7 @@ fn build_detail(state: &TuiState, width: usize) -> Vec<String> {
 ///   │    • enable nginx                               │
 ///   │    • start nginx                                │
 ///   │  ─────────────────────────────────────────────  │
-///   │     1 later completed plan also touched 'nginx' │  (if conflict)
+///   │    1 later completed plan also touched 'nginx'  │  (if conflict)
 ///   ├─────────────────────────────────────────────────┤
 ///   │        [ Enter: Apply ]   [ Esc: Cancel ]       │
 ///   ╰─────────────────────────────────────────────────╯

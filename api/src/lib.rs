@@ -23,57 +23,28 @@ mod service_validator;
 
 /// The resolved outcome of a processed intent, ready for the frontend to render.
 pub enum IntentOutcome {
-    /// Action completed immediately — returns the output lines.
     Immediate(Vec<String>),
-
-    /// Dry-run: returns the plan text but nothing was saved or executed.
-    DryRun { plan_text: Vec<String> },
-
-    /// Normal Path (Trip 1): plan saved, awaiting explicit user approval.
-    RequiresApproval { plan_id: String },
-
-    /// Forced path only: plan was executed immediately successfully.
+    DryRun {
+        plan: PlanSummary,
+    },
+    RequiresApproval {
+        plan: PlanSummary,
+    },
     Applied {
-        plan_id: String,
+        plan: PlanSummary,
         result_text: Vec<String>,
     },
-
-    /// Forced path only: plan was executed immediately and failed.
     ApplyFailed {
-        plan_id: String,
+        plan: PlanSummary,
         exec_errors: Vec<String>,
     },
-
-    /// User-approved execution (Trip 2) failed and auto-rollback restored previous state.
-    ///
-    /// `plan_text` is absent — the frontend already rendered the plan before the
-    /// approval prompt. `rollback_text` is raw executor output; the frontend owns
-    /// the rollback header.
     ApplyFailedRolledBack {
         exec_errors: Vec<String>,
         rollback_text: Vec<String>,
     },
-
-    /// User-approved execution (Trip 2) failed and auto-rollback also failed.
-    ///
-    /// `plan_text` is absent for the same reason as `ApplyFailedRolledBack`.
     ApplyFailedRollbackFailed {
         exec_errors: Vec<String>,
         rollback_errors: Vec<String>,
-    },
-
-    /// Manual rollback completed successfully.
-    ///
-    /// `rollback_text` is raw executor output; the frontend owns the rollback plan header.
-    RolledBack {
-        origin_plan_id: String,
-        rollback_text: Vec<String>,
-    },
-
-    /// Manual rollback failed.
-    RollbackFailed {
-        origin_plan_id: String,
-        errors: Vec<String>,
     },
 }
 
@@ -171,11 +142,6 @@ pub fn preview_rollback_intent(origin_plan_id: &str) -> Result<(String, Vec<Stri
     engine::build_rollback_plan(origin_plan_id)
 }
 
-/// Expose a saved plan's text for display by the frontend.
-pub fn read_plan_output(id: &str) -> Result<Vec<String>, String> {
-    engine::read_plan_output(id)
-}
-
 /// Returns all persisted plans as ready-to-consume summaries, sorted oldest-first.
 pub fn list_plans() -> Result<Vec<PlanSummary>, String> {
     engine::list_plans()
@@ -213,29 +179,21 @@ fn validate_request(
 /// Called only for Config actions. `result.pending_plan` being `None` means
 /// the target is already at the desired state — nothing to do.
 fn resolve_outcome(result: EngineResult, mode: &RunMode) -> Result<IntentOutcome, Vec<String>> {
-    let plan_text = result.output;
-
-    let Some(plan_id) = result.pending_plan else {
-        return Ok(IntentOutcome::Immediate(plan_text));
+    let Some(plan) = result.pending_plan else {
+        return Ok(IntentOutcome::Immediate(result.output));
     };
 
     match mode {
-        RunMode::DryRun => Ok(IntentOutcome::DryRun { plan_text }),
+        RunMode::DryRun => Ok(IntentOutcome::DryRun { plan }),
 
-        RunMode::Force => match engine_approve(&plan_id, true) {
-            Ok(result_text) => Ok(IntentOutcome::Applied {
-                plan_id,
-                result_text,
-            }),
+        RunMode::Force => match engine_approve(&plan.id, true) {
+            Ok(result_text) => Ok(IntentOutcome::Applied { plan, result_text }),
             // No auto-rollback on --force. Snapshot is on disk; the plan
             // history view lets the user undo manually.
-            Err(exec_errors) => Ok(IntentOutcome::ApplyFailed {
-                plan_id,
-                exec_errors,
-            }),
+            Err(exec_errors) => Ok(IntentOutcome::ApplyFailed { plan, exec_errors }),
         },
 
-        RunMode::Normal => Ok(IntentOutcome::RequiresApproval { plan_id }),
+        RunMode::Normal => Ok(IntentOutcome::RequiresApproval { plan }),
     }
 }
 
@@ -246,7 +204,7 @@ fn resolve_outcome(result: EngineResult, mode: &RunMode) -> Result<IntentOutcome
 /// rendered the plan before the approval prompt, so including it here would
 /// cause a double-print.
 fn build_rollback_outcome(plan_id: &str, exec_errors: Vec<String>) -> IntentOutcome {
-    let rollback_plan_id = match engine::build_rollback_plan(plan_id) {
+    let (rollback_plan_id, descriptions) = match engine::build_rollback_plan(plan_id) {
         Err(rollback_errors) => {
             return IntentOutcome::ApplyFailedRollbackFailed {
                 exec_errors,
@@ -262,13 +220,13 @@ fn build_rollback_outcome(plan_id: &str, exec_errors: Vec<String>) -> IntentOutc
                 ],
             };
         }
-        Ok((id, _)) => id,
+        Ok((id, descriptions)) => (id, descriptions),
     };
 
     match engine_approve(&rollback_plan_id, true) {
-        Ok(rollback_text) => IntentOutcome::ApplyFailedRolledBack {
+        Ok(_) => IntentOutcome::ApplyFailedRolledBack {
             exec_errors,
-            rollback_text,
+            rollback_text: descriptions,
         },
         Err(rollback_errors) => IntentOutcome::ApplyFailedRollbackFailed {
             exec_errors,

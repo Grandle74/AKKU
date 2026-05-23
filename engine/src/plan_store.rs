@@ -45,12 +45,6 @@ pub(crate) fn load(id: &str) -> Result<Plan, String> {
     serde_json::from_str(&content).map_err(|e| e.to_string())
 }
 
-/// Produces display lines from a saved plan — the engine's display gate for frontends.
-pub(crate) fn read_plan_output(id: &str) -> Result<Vec<String>, String> {
-    let plan = load(id)?;
-    Ok(plan.output)
-}
-
 /// Transitions the plan's recorded status field.
 ///
 /// Status lifecycle: `pending` → `executing` → `completed` | `failed` | `rejected`
@@ -120,7 +114,7 @@ pub(crate) fn list_plans() -> Result<Vec<PlanSummary>, String> {
 }
 
 /// Converts a persisted Plan into a frontend-consumable PlanSummary.
-fn to_summary(plan: Plan) -> PlanSummary {
+pub(crate) fn to_summary(plan: Plan) -> PlanSummary {
     PlanSummary {
         date: date_from_id(&plan.id),
         summary: build_summary(&plan),

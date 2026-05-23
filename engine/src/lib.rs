@@ -43,7 +43,7 @@ pub struct Order {
 /// at the desired state.
 pub struct EngineResult {
     pub output: Vec<String>,
-    pub pending_plan: Option<String>,
+    pub pending_plan: Option<PlanSummary>,
 }
 
 // ── Trip 1 ────────────────────────────────────────────────────────────────────
@@ -78,11 +78,10 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
                         plan.mode = Some(mode.clone());
                         plan_store::save(&plan).map_err(|e| vec![e])?;
                     }
-                    let output = plan.output;
-                    let plan_id = plan.id;
+                    let output = plan.output.clone();
                     Ok(EngineResult {
                         output,
-                        pending_plan: Some(plan_id),
+                        pending_plan: Some(plan_store::to_summary(plan)),
                     })
                 }
             }
@@ -164,15 +163,6 @@ pub fn build_rollback_plan(origin_plan_id: &str) -> Result<(String, Vec<String>)
 
     let descriptions = plan.steps.iter().map(|s| s.description.clone()).collect();
     Ok((plan.id, descriptions))
-}
-
-/// Reconstructs display lines for a saved plan from its persisted steps.
-///
-/// Not used by the in-session approval flow — that caller already holds
-/// the output from `EngineResult`. This path exists for out-of-session
-/// callers that need to display a past plan without a prior Trip 1.
-pub fn read_plan_output(id: &str) -> Result<Vec<String>, String> {
-    plan_store::read_plan_output(id)
 }
 
 /// Returns all persisted plans as ready-to-consume summaries, sorted oldest-first.
