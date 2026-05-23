@@ -61,34 +61,28 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
             let maybe_plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
 
             match maybe_plan {
-                None => {
-                    // Target is already at desired state — nothing to approve.
-                    let msg = format!(
+                None => Ok(EngineResult {
+                    output: vec![format!(
                         "✔ '{}' is already in the desired state — no changes needed.",
                         order.target.as_deref().unwrap_or("target")
-                    );
-                    Ok(EngineResult {
-                        output: vec![msg],
-                        pending_plan: None,
-                    })
-                }
+                    )],
+                    pending_plan: None,
+                }),
                 Some(mut plan) => {
-                    // None mode means dry-run — produce the plan display but leave no audit record.
                     if let Some(ref mode) = order.mode {
                         plan.mode = Some(mode.clone());
                         plan_store::save(&plan).map_err(|e| vec![e])?;
                     }
-                    let output = plan.output.clone();
+                    let summary = plan_store::to_summary(plan);
                     Ok(EngineResult {
-                        output,
-                        pending_plan: Some(plan_store::to_summary(plan)),
+                        output: vec![],
+                        pending_plan: Some(summary),
                     })
                 }
             }
         }
 
         _ => {
-            // Meta and Custom actions execute immediately — no planning, no approval needed.
             let output = executor::execute_normal(&order, &module).map_err(|e| vec![e])?;
             Ok(EngineResult {
                 output,
