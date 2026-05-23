@@ -166,6 +166,25 @@ pub struct PlanSummary {
     pub mode: Option<String>,
 }
 
+impl PlanSummary {
+    pub fn is_empty(&self) -> bool {
+        self.id.is_empty()
+    }
+
+    pub fn empty() -> Self {
+        PlanSummary {
+            id: String::new(),
+            target: String::new(),
+            status: String::new(),
+            date: String::new(),
+            summary: String::new(),
+            steps: vec![],
+            rollback_of: None,
+            mode: None,
+        }
+    }
+}
+
 /// A single step record within a `PlanSummary`.
 ///
 /// Carries only what frontends need for display — description and execution
@@ -175,4 +194,6 @@ pub struct StepSummary {
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<Vec<String>>,
 }

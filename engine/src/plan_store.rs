@@ -124,6 +124,7 @@ pub(crate) fn to_summary(plan: Plan) -> PlanSummary {
             .map(|s| StepSummary {
                 description: s.description,
                 status: s.status,
+                output: s.output,
             })
             .collect(),
         id: plan.id,

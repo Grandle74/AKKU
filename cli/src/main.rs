@@ -245,13 +245,14 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
         // No plan here — already printed before the approval prompt.
         IntentOutcome::ApplyFailedRolledBack {
             exec_errors,
-            rollback_text,
+            rollback_plan: _,
+            result,
         } => {
             println!("\n✗ Error: Execution failed — state restored.");
             println!();
             print_lines(&exec_errors);
             println!();
-            print_rollback_block(&rollback_text);
+            print_rollback_block(&result);
         }
 
         IntentOutcome::ApplyFailedRollbackFailed {

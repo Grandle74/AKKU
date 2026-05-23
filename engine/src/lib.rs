@@ -141,22 +141,21 @@ pub fn approve_plan(id: &str, approved: bool) -> Result<Vec<String>, Vec<String>
 /// Returns the plan ID and step descriptions for the caller to present before
 /// confirmation. The caller then passes the ID to `approve_plan` — this keeps
 /// the rollback on the standard approval path rather than a separate execution route.
-pub fn build_rollback_plan(origin_plan_id: &str) -> Result<(String, Vec<String>), Vec<String>> {
+pub fn build_rollback_plan(origin_plan_id: &str) -> Result<PlanSummary, Vec<String>> {
     let snapshot = snapshot::load(origin_plan_id).map_err(|e| vec![e])?;
     let order = snapshot.into_order().map_err(|e| vec![e])?;
     let module = module_resolver::ModuleId::resolve(&order.domain).map_err(|e| vec![e])?;
     let maybe_plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
 
     let Some(mut plan) = maybe_plan else {
-        return Ok((String::new(), vec![]));
+        return Ok(PlanSummary::empty());
     };
 
     plan.rollback_of = Some(origin_plan_id.to_string());
     plan.mode = Some("rollback".to_string());
     plan_store::save(&plan).map_err(|e| vec![e])?;
 
-    let descriptions = plan.steps.iter().map(|s| s.description.clone()).collect();
-    Ok((plan.id, descriptions))
+    Ok(plan_store::to_summary(plan))
 }
 
 /// Returns all persisted plans as ready-to-consume summaries, sorted oldest-first.

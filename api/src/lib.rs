@@ -40,7 +40,8 @@ pub enum IntentOutcome {
     },
     ApplyFailedRolledBack {
         exec_errors: Vec<String>,
-        rollback_text: Vec<String>,
+        rollback_plan: PlanSummary, // structure — for frontends that want to render steps
+        result: Vec<String>,        // execution output — for frontends that want raw result
     },
     ApplyFailedRollbackFailed {
         exec_errors: Vec<String>,
@@ -138,7 +139,7 @@ pub fn approve_intent(id: &str, approved: bool) -> IntentOutcome {
 /// Called by the frontend's plan history view before asking the user to confirm.
 /// The returned plan ID is passed to `approve_intent` on confirmation, giving the
 /// user a chance to review exactly what will be restored.
-pub fn preview_rollback_intent(origin_plan_id: &str) -> Result<(String, Vec<String>), Vec<String>> {
+pub fn preview_rollback_intent(origin_plan_id: &str) -> Result<PlanSummary, Vec<String>> {
     engine::build_rollback_plan(origin_plan_id)
 }
 
@@ -204,29 +205,30 @@ fn resolve_outcome(result: EngineResult, mode: &RunMode) -> Result<IntentOutcome
 /// rendered the plan before the approval prompt, so including it here would
 /// cause a double-print.
 fn build_rollback_outcome(plan_id: &str, exec_errors: Vec<String>) -> IntentOutcome {
-    let (rollback_plan_id, descriptions) = match engine::build_rollback_plan(plan_id) {
+    let summary = match engine::build_rollback_plan(plan_id) {
         Err(rollback_errors) => {
             return IntentOutcome::ApplyFailedRollbackFailed {
                 exec_errors,
                 rollback_errors,
             };
         }
-        // Empty id means the snapshot delta was zero — nothing to restore.
-        Ok((id, _)) if id.is_empty() => {
+        Ok(s) if s.is_empty() => {
             return IntentOutcome::ApplyFailedRolledBack {
                 exec_errors,
-                rollback_text: vec![
+                rollback_plan: PlanSummary::empty(),
+                result: vec![
                     "Nothing to restore — pre-change state matches current state.".to_string(),
                 ],
             };
         }
-        Ok((id, descriptions)) => (id, descriptions),
+        Ok(s) => s,
     };
 
-    match engine_approve(&rollback_plan_id, true) {
-        Ok(_) => IntentOutcome::ApplyFailedRolledBack {
+    match engine_approve(&summary.id, true) {
+        Ok(result) => IntentOutcome::ApplyFailedRolledBack {
             exec_errors,
-            rollback_text: descriptions,
+            rollback_plan: summary,
+            result,
         },
         Err(rollback_errors) => IntentOutcome::ApplyFailedRollbackFailed {
             exec_errors,

@@ -80,7 +80,7 @@ struct TuiState {
     showing_popup: bool,
     /// The generated rollback plan shown in the popup, awaiting user confirmation.
     /// Set when showing_popup becomes true; consumed (and cleared) on confirmation.
-    pending_rollback_plan: Option<(String, Vec<String>)>,
+    pending_rollback_plan: Option<PlanSummary>,
 }
 
 fn run_tui(entries: Vec<PlanSummary>) -> Result<(), String> {
@@ -121,8 +121,8 @@ fn run_tui(entries: Vec<PlanSummary>) -> Result<(), String> {
                 KeyCode::Esc => {
                     if state.showing_popup {
                         state.showing_popup = false;
-                        if let Some((plan_id, _)) = state.pending_rollback_plan.take() {
-                            let _ = approve_intent(&plan_id, false);
+                        if let Some(summary) = state.pending_rollback_plan.take() {
+                            let _ = approve_intent(&summary.id, false);
                         }
                         state.message = Some("Rollback cancelled.".into());
 
@@ -194,15 +194,15 @@ fn handle_enter(state: &mut TuiState) {
         state.showing_popup = false;
 
         // Single .take() — consume once, use the value.
-        let (plan_id, _) = match state.pending_rollback_plan.take() {
-            Some(p) => p,
+        let summary = match state.pending_rollback_plan.take() {
+            Some(s) => s,
             None => {
                 state.message = Some("✗ No rollback plan ready — try again.".into());
                 return;
             }
         };
 
-        match approve_intent(&plan_id, true) {
+        match approve_intent(&summary.id, true) {
             IntentOutcome::Immediate(lines) => {
                 state.message = Some(lines.first().cloned().unwrap_or_else(|| "✔ Done.".into()));
             }
@@ -225,12 +225,12 @@ fn handle_enter(state: &mut TuiState) {
             .unwrap_or_else(|_| Err(vec!["Internal error — engine panicked".into()]));
 
         match preview_result {
-            Ok((plan_id, _)) if plan_id.is_empty() => {
+            Ok(summary) if summary.is_empty() => {
                 state.message =
                     Some("✔ Already at pre-execution state — nothing to restore.".into());
             }
-            Ok((plan_id, descriptions)) => {
-                state.pending_rollback_plan = Some((plan_id, descriptions));
+            Ok(summary) => {
+                state.pending_rollback_plan = Some(summary);
                 state.showing_popup = true;
                 state.message = None;
             }
@@ -527,9 +527,9 @@ fn draw_popup(
     body.push((format!("  {}", sep), Color::DarkGrey));
 
     match &state.pending_rollback_plan {
-        Some((_, descriptions)) if !descriptions.is_empty() => {
-            for desc in descriptions {
-                body.push((format!("    • {}", desc), Color::Reset));
+        Some(summary) if !summary.steps.is_empty() => {
+            for step in &summary.steps {
+                body.push((format!("    • {}", step.description), Color::Reset));
             }
         }
         Some(_) => body.push((
