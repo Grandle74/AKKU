@@ -25,6 +25,8 @@ pub struct Plan {
     pub id: String,
     pub(crate) module_id: ModuleId,
     pub target: String,
+    #[serde(default)]
+    pub(crate) status: Option<String>,
     pub output: Vec<String>,
     pub steps: Steps,
     /// "normal", "force", or "rollback". None on freshly planned in-memory plans —
@@ -95,6 +97,7 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
         id: generate_id(module_prefix(module)),
         module_id: module.clone(),
         target: target.to_string(),
+        status: None,
         output,
         steps,
         rollback_of: None,

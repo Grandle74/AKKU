@@ -142,3 +142,37 @@ impl Step {
         }
     }
 }
+
+// ── Plan History Types ────────────────────────────────────────────────────────
+
+/// A fully prepared plan record for frontend consumption.
+///
+/// Built by `plan_store` from persisted data — never constructed by frontends.
+/// All fields are pre-processed: `date` is already formatted, `summary` is
+/// already built. Frontends render; they do not transform.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct PlanSummary {
+    pub id: String,
+    pub target: String,
+    pub status: String,
+    /// Human-readable creation time, derived from the plan ID by `plan_store`.
+    pub date: String,
+    /// One-line action summary, e.g. "enable, start nginx" or "rolled back svc_...".
+    pub summary: String,
+    pub steps: Vec<StepSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rollback_of: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+
+/// A single step record within a `PlanSummary`.
+///
+/// Carries only what frontends need for display — description and execution
+/// status. Raw execution data stays in the engine.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct StepSummary {
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
