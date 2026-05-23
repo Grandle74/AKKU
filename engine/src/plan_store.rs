@@ -46,7 +46,7 @@ pub(crate) fn load(id: &str) -> Result<Plan, String> {
 }
 
 /// Produces display lines from a saved plan — the engine's display gate for frontends.
-pub(crate) fn read(id: &str) -> Result<Vec<String>, String> {
+pub(crate) fn read_plan_output(id: &str) -> Result<Vec<String>, String> {
     let plan = load(id)?;
     Ok(plan.output)
 }

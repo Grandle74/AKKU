@@ -13,7 +13,7 @@
 //   Manual rollback — triggered by rollback_intent(), called by the frontend
 //                     after the user picks a plan from the plan history view.
 
-pub use engine::{Action, PropertyValue};
+pub use engine::{Action, PlanSummary, PropertyValue, StepSummary};
 use engine::{Domain, EngineResult, Order, approve_plan as engine_approve, execute_order};
 use std::collections::HashMap;
 
@@ -172,8 +172,13 @@ pub fn preview_rollback_intent(origin_plan_id: &str) -> Result<(String, Vec<Stri
 }
 
 /// Expose a saved plan's text for display by the frontend.
-pub fn read_plan(id: &str) -> Result<Vec<String>, String> {
-    engine::read_plan(id)
+pub fn read_plan_output(id: &str) -> Result<Vec<String>, String> {
+    engine::read_plan_output(id)
+}
+
+/// Returns all persisted plans as ready-to-consume summaries, sorted oldest-first.
+pub fn list_plans() -> Result<Vec<PlanSummary>, String> {
+    engine::list_plans()
 }
 
 // ── Internal Helpers ──────────────────────────────────────────────────────────

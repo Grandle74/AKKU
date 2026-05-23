@@ -9,7 +9,7 @@
 // module_resolver) communicate only through this file — never directly
 // with each other.
 
-pub use shared_libs::{Action, Domain, PropertyValue};
+pub use shared_libs::{Action, Domain, PlanSummary, PropertyValue, StepSummary};
 use std::collections::HashMap;
 
 mod executor;
@@ -171,6 +171,11 @@ pub fn build_rollback_plan(origin_plan_id: &str) -> Result<(String, Vec<String>)
 /// Not used by the in-session approval flow — that caller already holds
 /// the output from `EngineResult`. This path exists for out-of-session
 /// callers that need to display a past plan without a prior Trip 1.
-pub fn read_plan(id: &str) -> Result<Vec<String>, String> {
-    plan_store::read(id)
+pub fn read_plan_output(id: &str) -> Result<Vec<String>, String> {
+    plan_store::read_plan_output(id)
+}
+
+/// Returns all persisted plans as ready-to-consume summaries, sorted oldest-first.
+pub fn list_plans() -> Result<Vec<PlanSummary>, String> {
+    plan_store::list_plans()
 }

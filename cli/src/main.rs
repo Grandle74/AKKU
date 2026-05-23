@@ -18,7 +18,7 @@
 
 use api::{
     Action, IntentOutcome, PropertyValue, RunMode, approve_intent, process_bi_intent,
-    process_tri_intent, read_plan,
+    process_tri_intent, read_plan_output,
 };
 use rustyline::error::ReadlineError;
 use std::collections::HashMap;
@@ -212,7 +212,7 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
         }
 
         IntentOutcome::RequiresApproval { plan_id } => {
-            if let Ok(plan_text) = read_plan(&plan_id) {
+            if let Ok(plan_text) = read_plan_output(&plan_id) {
                 print_lines(&plan_text);
             }
             print!("\nApply this plan? [y/N]: ");
@@ -231,7 +231,7 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
             result_text,
         } => {
             println!();
-            if let Ok(plan_text) = read_plan(&plan_id) {
+            if let Ok(plan_text) = read_plan_output(&plan_id) {
                 print_lines(&plan_text);
             }
             println!("\n⚡ --force: auto-approving plan.");
@@ -244,7 +244,7 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
             exec_errors,
         } => {
             println!();
-            if let Ok(plan_text) = read_plan(&plan_id) {
+            if let Ok(plan_text) = read_plan_output(&plan_id) {
                 print_lines(&plan_text);
             }
             println!("\n⚡ --force: auto-approving plan.");
