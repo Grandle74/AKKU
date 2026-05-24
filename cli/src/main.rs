@@ -231,40 +231,44 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
         }
 
         // --force failed — snapshot saved, user can rollback via History.
-        IntentOutcome::ApplyFailed { plan, exec_errors } => {
+        IntentOutcome::ApplyFailed {
+            plan,
+            exec_errors: apply_errors,
+        } => {
             println!();
             print_plan(&plan);
             println!("\n⚡ --force: auto-approving plan.");
             println!("✗ Error: Execution failed — snapshot saved for manual rollback.");
             println!();
-            print_lines(&exec_errors);
+            print_lines(&apply_errors);
         }
 
         // ── Normal path failures ──────────────────────────────────────────────
         //
         // No plan here — already printed before the approval prompt.
         IntentOutcome::ApplyFailedRolledBack {
-            exec_errors,
+            apply_errors,
             rollback_plan: _,
             result,
         } => {
             println!("\n✗ Error: Execution failed — state restored.");
             println!();
-            print_lines(&exec_errors);
+            print_lines(&apply_errors);
             println!();
             print_rollback_block(&result);
         }
 
         IntentOutcome::ApplyFailedRollbackFailed {
-            exec_errors,
+            apply_errors,
             rollback_errors,
+            rollback_plan: _,
         } => {
             println!(
                 "\n✗ Error: Execution failed — rollback also failed. System state is unknown."
             );
             println!("\nExecution errors:");
             println!();
-            print_lines(&exec_errors);
+            print_lines(&apply_errors);
             println!("\nRollback errors:");
             println!();
             print_lines(&rollback_errors);

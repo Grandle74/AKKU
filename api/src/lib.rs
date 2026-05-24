@@ -38,14 +38,17 @@ pub enum IntentOutcome {
         plan: PlanSummary,
         exec_errors: Vec<String>,
     },
+
     ApplyFailedRolledBack {
-        exec_errors: Vec<String>,
+        apply_errors: Vec<String>,  // original plan failed
+        result: Vec<String>,        // rollback execution output
         rollback_plan: PlanSummary, // structure — for frontends that want to render steps
-        result: Vec<String>,        // execution output — for frontends that want raw result
     },
+
     ApplyFailedRollbackFailed {
-        exec_errors: Vec<String>,
-        rollback_errors: Vec<String>,
+        apply_errors: Vec<String>,          // original plan failed
+        rollback_errors: Vec<String>,       // rollback also failed
+        rollback_plan: Option<PlanSummary>, // structure — for frontends that want to render steps
     },
 }
 
@@ -204,17 +207,18 @@ fn resolve_outcome(result: EngineResult, mode: &RunMode) -> Result<IntentOutcome
 /// `plan_text` is intentionally not threaded through — the frontend already
 /// rendered the plan before the approval prompt, so including it here would
 /// cause a double-print.
-fn build_rollback_outcome(plan_id: &str, exec_errors: Vec<String>) -> IntentOutcome {
+fn build_rollback_outcome(plan_id: &str, apply_errors: Vec<String>) -> IntentOutcome {
     let summary = match engine::build_rollback_plan(plan_id) {
         Err(rollback_errors) => {
             return IntentOutcome::ApplyFailedRollbackFailed {
-                exec_errors,
+                apply_errors,
                 rollback_errors,
+                rollback_plan: None,
             };
         }
         Ok(s) if s.is_empty() => {
             return IntentOutcome::ApplyFailedRolledBack {
-                exec_errors,
+                apply_errors,
                 rollback_plan: PlanSummary::empty(),
                 result: vec![
                     "Nothing to restore — pre-change state matches current state.".to_string(),
@@ -226,13 +230,14 @@ fn build_rollback_outcome(plan_id: &str, exec_errors: Vec<String>) -> IntentOutc
 
     match engine_approve(&summary.id, true) {
         Ok(result) => IntentOutcome::ApplyFailedRolledBack {
-            exec_errors,
+            apply_errors,
             rollback_plan: summary,
             result,
         },
         Err(rollback_errors) => IntentOutcome::ApplyFailedRollbackFailed {
-            exec_errors,
+            apply_errors,
             rollback_errors,
+            rollback_plan: Some(summary),
         },
     }
 }
