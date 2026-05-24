@@ -17,8 +17,8 @@
 // needed from lower layers are re-exported through `api`.
 
 use api::{
-    Action, IntentOutcome, PropertyValue, RunMode, approve_intent, process_bi_intent,
-    process_tri_intent, read_plan_output,
+    Action, IntentOutcome, PlanSummary, PropertyValue, RunMode, approve_intent, process_bi_intent,
+    process_tri_intent,
 };
 use rustyline::error::ReadlineError;
 use std::collections::HashMap;
@@ -207,102 +207,71 @@ fn render_outcome(action: &str, outcome: IntentOutcome) {
             print_result(action, Ok(output));
         }
 
-        IntentOutcome::DryRun { plan_text } => {
-            print_lines(&plan_text);
+        IntentOutcome::DryRun { plan } => {
+            print_plan(&plan);
         }
 
-        IntentOutcome::RequiresApproval { plan_id } => {
-            if let Ok(plan_text) = read_plan_output(&plan_id) {
-                print_lines(&plan_text);
-            }
+        IntentOutcome::RequiresApproval { plan } => {
+            print_plan(&plan);
             print!("\nApply this plan? [y/N]: ");
             io::stdout().flush().unwrap();
             let mut input = String::new();
             io::stdin().read_line(&mut input).unwrap();
             let approved = matches!(input.trim().to_lowercase().as_str(), "y" | "yes");
-
             println!();
-            render_outcome(action, approve_intent(&plan_id, approved));
+            render_outcome(action, approve_intent(&plan.id, approved));
         }
 
         // ── Force path ────────────────────────────────────────────────────────
-        IntentOutcome::Applied {
-            plan_id,
-            result_text,
-        } => {
+        IntentOutcome::Applied { plan, result_text } => {
             println!();
-            if let Ok(plan_text) = read_plan_output(&plan_id) {
-                print_lines(&plan_text);
-            }
+            print_plan(&plan);
             println!("\n⚡ --force: auto-approving plan.");
             print_result(action, Ok(result_text));
         }
 
         // --force failed — snapshot saved, user can rollback via History.
         IntentOutcome::ApplyFailed {
-            plan_id,
-            exec_errors,
+            plan,
+            exec_errors: apply_errors,
         } => {
             println!();
-            if let Ok(plan_text) = read_plan_output(&plan_id) {
-                print_lines(&plan_text);
-            }
+            print_plan(&plan);
             println!("\n⚡ --force: auto-approving plan.");
             println!("✗ Error: Execution failed — snapshot saved for manual rollback.");
             println!();
-            print_lines(&exec_errors);
+            print_lines(&apply_errors);
         }
 
         // ── Normal path failures ──────────────────────────────────────────────
         //
-        // No plan_text here — already printed before the approval prompt.
+        // No plan here — already printed before the approval prompt.
         IntentOutcome::ApplyFailedRolledBack {
-            exec_errors,
-            rollback_text,
+            apply_errors,
+            rollback_plan: _,
+            result,
         } => {
             println!("\n✗ Error: Execution failed — state restored.");
             println!();
-            print_lines(&exec_errors);
+            print_lines(&apply_errors);
             println!();
-            print_rollback_block(&rollback_text);
+            print_rollback_block(&result);
         }
 
         IntentOutcome::ApplyFailedRollbackFailed {
-            exec_errors,
+            apply_errors,
             rollback_errors,
+            rollback_plan: _,
         } => {
             println!(
                 "\n✗ Error: Execution failed — rollback also failed. System state is unknown."
             );
             println!("\nExecution errors:");
             println!();
-            print_lines(&exec_errors);
+            print_lines(&apply_errors);
             println!("\nRollback errors:");
             println!();
             print_lines(&rollback_errors);
-        }
-
-        // ── Manual rollback outcomes (History flow — not yet wired in CLI) ────
-        //
-        // This is the sole action for this path, so the full block is shown.
-        IntentOutcome::RolledBack {
-            origin_plan_id: _,
-            rollback_text,
-        } => {
-            println!();
-            print_rollback_block(&rollback_text);
-        }
-
-        IntentOutcome::RollbackFailed {
-            origin_plan_id,
-            errors,
-        } => {
-            println!(
-                "✗ Rollback of plan '{}' failed — system state may be inconsistent.",
-                origin_plan_id
-            );
-            println!();
-            print_lines(&errors);
         }
     }
 }
@@ -354,6 +323,20 @@ fn print_lines(items: &[String]) {
     for item in items {
         println!("{}", item);
     }
+}
+
+/// Renders a plan summary as a header/steps/footer block.
+///
+/// This is the frontend's own rendering of structured plan data —
+/// the engine no longer produces display text for plans.
+fn print_plan(plan: &PlanSummary) {
+    let header = format!("=== Plan for '{}' ===", plan.target);
+    let footer = "=".repeat(header.len());
+    println!("{}", header);
+    for step in &plan.steps {
+        println!("  • {}", step.description);
+    }
+    println!("{}", footer);
 }
 
 // ── Input Parsing ─────────────────────────────────────────────────────────────
