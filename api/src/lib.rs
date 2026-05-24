@@ -23,32 +23,39 @@ mod service_validator;
 
 /// The resolved outcome of a processed intent, ready for the frontend to render.
 pub enum IntentOutcome {
+    /// Action completed immediately — returns the output lines.
     Immediate(Vec<String>),
-    DryRun {
-        plan: PlanSummary,
-    },
-    RequiresApproval {
-        plan: PlanSummary,
-    },
+
+    /// Dry-run: returns the plan structure but nothing was saved or executed.
+    DryRun { plan: PlanSummary },
+
+    /// Normal path (Trip 1): plan saved, awaiting explicit user approval.
+    RequiresApproval { plan: PlanSummary },
+
+    /// Forced path only: plan was executed immediately and succeeded.
     Applied {
         plan: PlanSummary,
         result_text: Vec<String>,
     },
+
+    /// Forced path only: plan was executed immediately and failed.
     ApplyFailed {
         plan: PlanSummary,
         exec_errors: Vec<String>,
     },
 
+    /// User-approved execution failed; auto-rollback succeeded.
     ApplyFailedRolledBack {
         apply_errors: Vec<String>,  // original plan failed
         result: Vec<String>,        // rollback execution output
         rollback_plan: PlanSummary, // structure — for frontends that want to render steps
     },
 
+    /// User-approved execution failed; auto-rollback also failed.
     ApplyFailedRollbackFailed {
         apply_errors: Vec<String>,          // original plan failed
         rollback_errors: Vec<String>,       // rollback also failed
-        rollback_plan: Option<PlanSummary>, // structure — for frontends that want to render steps
+        rollback_plan: Option<PlanSummary>, // None if rollback plan could not be built; Some if built but execution failed
     },
 }
 
@@ -140,8 +147,8 @@ pub fn approve_intent(id: &str, approved: bool) -> IntentOutcome {
 /// Generate and save the rollback plan for a given origin plan without executing it.
 ///
 /// Called by the frontend's plan history view before asking the user to confirm.
-/// The returned plan ID is passed to `approve_intent` on confirmation, giving the
-/// user a chance to review exactly what will be restored.
+/// The returned `PlanSummary.id` is passed to `approve_intent` on confirmation,
+/// giving the user a chance to review exactly what will be restored.
 pub fn preview_rollback_intent(origin_plan_id: &str) -> Result<PlanSummary, Vec<String>> {
     engine::build_rollback_plan(origin_plan_id)
 }
@@ -203,10 +210,6 @@ fn resolve_outcome(result: EngineResult, mode: &RunMode) -> Result<IntentOutcome
 
 /// Attempt auto-rollback after a user-approved execution failure and return
 /// the appropriate structured outcome.
-///
-/// `plan_text` is intentionally not threaded through — the frontend already
-/// rendered the plan before the approval prompt, so including it here would
-/// cause a double-print.
 fn build_rollback_outcome(plan_id: &str, apply_errors: Vec<String>) -> IntentOutcome {
     let summary = match engine::build_rollback_plan(plan_id) {
         Err(rollback_errors) => {
