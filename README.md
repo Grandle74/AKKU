@@ -87,7 +87,7 @@ cargo run
 # <module> <action> [target] [properties...] [flags]
 
 # Read-only commands
-commando(v0.1)~> service reset          # no target
+commando(v0.1)~> service clean          # no target
 commando(v0.1)~> service reload nginx   # targeted
 
 # Declarative state commands
