@@ -25,7 +25,8 @@ pub struct Plan {
     pub id: String,
     pub(crate) module_id: ModuleId,
     pub target: String,
-    pub output: Vec<String>,
+    #[serde(default)]
+    pub(crate) status: Option<String>,
     pub steps: Steps,
     /// "normal", "force", or "rollback". None on freshly planned in-memory plans —
     /// the API layer stamps this before saving.
@@ -84,18 +85,11 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
         return Ok(None);
     }
 
-    let header = format!("=== Plan for '{}' ===", target);
-    let footer = "=".repeat(header.len());
-
-    let mut output = vec![header];
-    output.extend(steps.iter().map(|s| format!("  • {}", s.description)));
-    output.push(footer);
-
     Ok(Some(Plan {
         id: generate_id(module_prefix(module)),
         module_id: module.clone(),
         target: target.to_string(),
-        output,
+        status: None,
         steps,
         rollback_of: None,
         mode: None,

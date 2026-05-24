@@ -9,7 +9,7 @@
 // module_resolver) communicate only through this file — never directly
 // with each other.
 
-pub use shared_libs::{Action, Domain, PropertyValue};
+pub use shared_libs::{Action, Domain, PlanSummary, PropertyValue, StepSummary};
 use std::collections::HashMap;
 
 mod executor;
@@ -43,7 +43,7 @@ pub struct Order {
 /// at the desired state.
 pub struct EngineResult {
     pub output: Vec<String>,
-    pub pending_plan: Option<String>,
+    pub pending_plan: Option<PlanSummary>,
 }
 
 // ── Trip 1 ────────────────────────────────────────────────────────────────────
@@ -61,35 +61,28 @@ pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
             let maybe_plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
 
             match maybe_plan {
-                None => {
-                    // Target is already at desired state — nothing to approve.
-                    let msg = format!(
+                None => Ok(EngineResult {
+                    output: vec![format!(
                         "✔ '{}' is already in the desired state — no changes needed.",
                         order.target.as_deref().unwrap_or("target")
-                    );
-                    Ok(EngineResult {
-                        output: vec![msg],
-                        pending_plan: None,
-                    })
-                }
+                    )],
+                    pending_plan: None,
+                }),
                 Some(mut plan) => {
-                    // None mode means dry-run — produce the plan display but leave no audit record.
                     if let Some(ref mode) = order.mode {
                         plan.mode = Some(mode.clone());
                         plan_store::save(&plan).map_err(|e| vec![e])?;
                     }
-                    let output = plan.output;
-                    let plan_id = plan.id;
+                    let summary = plan_store::to_summary(plan);
                     Ok(EngineResult {
-                        output,
-                        pending_plan: Some(plan_id),
+                        output: vec![],
+                        pending_plan: Some(summary),
                     })
                 }
             }
         }
 
         _ => {
-            // Meta and Custom actions execute immediately — no planning, no approval needed.
             let output = executor::execute_normal(&order, &module).map_err(|e| vec![e])?;
             Ok(EngineResult {
                 output,
@@ -148,29 +141,24 @@ pub fn approve_plan(id: &str, approved: bool) -> Result<Vec<String>, Vec<String>
 /// Returns the plan ID and step descriptions for the caller to present before
 /// confirmation. The caller then passes the ID to `approve_plan` — this keeps
 /// the rollback on the standard approval path rather than a separate execution route.
-pub fn build_rollback_plan(origin_plan_id: &str) -> Result<(String, Vec<String>), Vec<String>> {
+pub fn build_rollback_plan(origin_plan_id: &str) -> Result<PlanSummary, Vec<String>> {
     let snapshot = snapshot::load(origin_plan_id).map_err(|e| vec![e])?;
     let order = snapshot.into_order().map_err(|e| vec![e])?;
     let module = module_resolver::ModuleId::resolve(&order.domain).map_err(|e| vec![e])?;
     let maybe_plan = planner::create_plan(&module, &order).map_err(|e| vec![e])?;
 
     let Some(mut plan) = maybe_plan else {
-        return Ok((String::new(), vec![]));
+        return Ok(PlanSummary::empty());
     };
 
     plan.rollback_of = Some(origin_plan_id.to_string());
     plan.mode = Some("rollback".to_string());
     plan_store::save(&plan).map_err(|e| vec![e])?;
 
-    let descriptions = plan.steps.iter().map(|s| s.description.clone()).collect();
-    Ok((plan.id, descriptions))
+    Ok(plan_store::to_summary(plan))
 }
 
-/// Reconstructs display lines for a saved plan from its persisted steps.
-///
-/// Not used by the in-session approval flow — that caller already holds
-/// the output from `EngineResult`. This path exists for out-of-session
-/// callers that need to display a past plan without a prior Trip 1.
-pub fn read_plan(id: &str) -> Result<Vec<String>, String> {
-    plan_store::read(id)
+/// Returns all persisted plans as ready-to-consume summaries, sorted oldest-first.
+pub fn list_plans() -> Result<Vec<PlanSummary>, String> {
+    plan_store::list_plans()
 }
