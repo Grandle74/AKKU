@@ -16,15 +16,12 @@ use std::collections::HashMap;
 /// `Plan` is a pure data carrier — it does not save itself, update statuses,
 /// or execute anything. All side effects are handled by `plan_store` and
 /// `executor`.
-///
-/// `output` is excluded from serialization: it is display text assembled
-/// for the current session. The file format uses `steps` as the source of
-/// truth; frontends rebuild their own view from steps on read.
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Plan {
     pub id: String,
     pub(crate) module_id: ModuleId,
     pub target: String,
+    // `serde(default)` tolerates plan files written before this field existed.
     #[serde(default)]
     pub(crate) status: Option<String>,
     pub steps: Steps,

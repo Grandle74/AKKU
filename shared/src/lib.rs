@@ -171,6 +171,7 @@ impl PlanSummary {
         self.id.is_empty()
     }
 
+    /// Sentinel value returned when planning produces no steps — target is already at desired state.
     pub fn empty() -> Self {
         PlanSummary {
             id: String::new(),
@@ -187,8 +188,8 @@ impl PlanSummary {
 
 /// A single step record within a `PlanSummary`.
 ///
-/// Carries only what frontends need for display — description and execution
-/// status. Raw execution data stays in the engine.
+/// Strips the dispatch fields (`domain`, `action`, `target`) — frontends
+/// need description and execution result only.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct StepSummary {
     pub description: String,

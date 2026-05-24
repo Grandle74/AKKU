@@ -38,9 +38,8 @@ pub struct Order {
 /// Returned by `execute_order` for every action.
 ///
 /// `pending_plan` is `Some` only for Config actions with at least one step.
-/// The frontend must send the plan ID back via `approve_plan` after the user confirms.
-/// `None` means either the action was not declarative, or the target is already
-/// at the desired state.
+/// The frontend reads `pending_plan.id` and passes it to `approve_plan` after confirmation.
+/// `None` means the action was not declarative, or the target is already at the desired state.
 pub struct EngineResult {
     pub output: Vec<String>,
     pub pending_plan: Option<PlanSummary>,
@@ -51,8 +50,8 @@ pub struct EngineResult {
 /// Dispatches an Order and returns output or a plan awaiting approval.
 ///
 /// The engine does not distinguish run modes (dry-run, force, normal) —
-/// that is the API's responsibility. The engine always returns the plan ID +
-/// plan output when a plan is created; what the API does with it is the API's concern.
+/// that is the API's responsibility. When a plan is created, `output` is
+/// empty — the caller renders display from `pending_plan` instead.
 pub fn execute_order(order: Order) -> Result<EngineResult, Vec<String>> {
     let module = module_resolver::ModuleId::resolve(&order.domain).map_err(|e| vec![e])?;
 
@@ -138,9 +137,10 @@ pub fn approve_plan(id: &str, approved: bool) -> Result<Vec<String>, Vec<String>
 
 /// Builds a rollback plan from a snapshot and saves it to disk without executing it.
 ///
-/// Returns the plan ID and step descriptions for the caller to present before
-/// confirmation. The caller then passes the ID to `approve_plan` — this keeps
-/// the rollback on the standard approval path rather than a separate execution route.
+/// Returns a `PlanSummary` for the caller to present before confirmation, or
+/// `PlanSummary::empty()` if no changes are needed. The caller passes
+/// `summary.id` to `approve_plan` — keeping rollback on the standard approval
+/// path rather than a separate execution route.
 pub fn build_rollback_plan(origin_plan_id: &str) -> Result<PlanSummary, Vec<String>> {
     let snapshot = snapshot::load(origin_plan_id).map_err(|e| vec![e])?;
     let order = snapshot.into_order().map_err(|e| vec![e])?;
