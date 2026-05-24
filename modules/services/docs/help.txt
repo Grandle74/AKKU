@@ -2,13 +2,27 @@
 Usage: service <action> [target]
        service cfg <target> <property>=<value> ...
 
+Meta actions (no target):
+  list              List all loaded service units
+  help              Show this message
+  clean             Reset all failed services system-wide
+
 Imperative actions:
-  list              List all active services
-  reset             Reset all failed services
-  status  <name>    Show service status
+  status  <name>    Show raw service status output
   reload  <name>    Reload or restart a service
 
 Declarative (desired state):
+  Action keywords: cfg / config / change
   service cfg <name> running=true enabled=yes masked=0
-  Properties: running=(bool), enabled (bool), masked (bool)
+
+  Properties:
+    running  (bool)   Whether the service should be active
+    enabled  (bool)   Whether the service should start on boot
+    masked   (bool)   Whether the service should be masked
+
+  Bool values: true / yes / 1  and  false / no / 0
+
+  Conflicts:
+    running=true + masked=true   not allowed
+    enabled=true + masked=true   not allowed
 ──────────────────────────────────────────────────────────────

@@ -1,20 +1,26 @@
 ── Commando Help ──────────────────────────────────────────────
-Commando is an Official Reference CLI for AKKU Development.
+Commando is the Official Reference CLI for AKKU Development.
 
 Built-in commands:
   help              Show this message
-  clear             Clear the screen
-  exit              Exit commando
-  history           Show Plan History and Perform Manual Rollback
+  clear / cls       Clear the screen
+  exit / quit       Exit commando
+  history           Show plan history and perform manual rollback
 
-Flags (appended to configuration command "cfg"):
+Flags (cfg commands only — position-independent):
   --dry-run         Show the plan without saving or executing
-  --force           Auto-approve the plan without prompting
+  --force           Auto-approve without prompting (overrides --dry-run)
 
-Usage Pattern:
-  <module> <action> [target] [properties...] [flags]
+Usage pattern:
+  <domain> <action> [target] [properties...] [flags]
 
-Example:
+Domain aliases:
+  service / srv / services
+
+Examples:
+  service list
   service status apache2
-  service cfg nginx running=true --dry-run
+  service cfg nginx running=true
+  service cfg nginx running=true enabled=true --dry-run
+  service cfg nginx masked=true --force
 ──────────────────────────────────────────────────────────────
