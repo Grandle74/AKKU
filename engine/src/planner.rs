@@ -95,6 +95,11 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
 
 // ── Module-Specific Planners ──────────────────────────────────────────────────
 
+// TODO: This function reaches directly into services::state_helpers — it calls
+// calc() and to_steps() with Delta crossing the module boundary as a pub type.
+// The initial direction is for the planner to receive a Steps-producing function
+// from each module bundle (see ModulesManager.md) instead of orchestrating the diff itself.
+// The exact shape of that interface is not yet decided.
 fn plan_services(target: &str, props: &HashMap<String, PropertyValue>) -> Result<Steps, String> {
     let current = services::state_helpers::ServiceCurrentState::new(target)?;
     let desired = services::state_helpers::ServiceDesiredState::from_props(target, props)?;

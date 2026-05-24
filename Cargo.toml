@@ -5,6 +5,7 @@ members = [
     "api",
     "engine",
     "modules/services",
+    "shared_libs"
 ]
 default-members = ["cli"]
 

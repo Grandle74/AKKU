@@ -7,7 +7,7 @@ edition = "2024"
 chrono = "0.4.44"
 serde_json = { workspace = true }
 serde = { workspace = true }
-shared_libs = { path = "../shared" }
+shared_libs = { path = "../shared_libs" }
 #network = { path = "../modules/network" }
 #package = { path = "../modules/package" }
 services = { path = "../modules/services" }
