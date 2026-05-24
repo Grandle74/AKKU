@@ -1,31 +1,28 @@
 // engine/src/executor/services.rs
 //
-// Dispatch layer between the engine executor and the services module.
+// Systemd-specific dispatch between the engine executor and the services module.
 //
-// Two responsibilities:
-//   - execute_services:      routes imperative Meta/Custom actions to the
-//                            correct services function.
-//   - execute_services_plan: iterates a Plan's Steps and executes each one,
-//                            failing fast on the first error.
+// Temporary stand-in — when the Module Bundle design is introduced, action
+// dispatch moves into each bundle's engine-side handlers.
+// This file will be removed at that point.
+// See ModulesManager.md.
 //
-// This file is the ONLY place in the engine that imports the services crate.
-// No systemctl logic lives here — that belongs in modules/services.
+// This is the only file in the engine that imports the services crate.
 
 use crate::{Action, Order, Plan};
 
 /// Routes an imperative Order to the correct services function.
 ///
-/// Meta actions (list, help, reset) need no target.
-/// Custom actions (status, reload, ...) require a target in the Order.
+/// Meta actions require no target. Custom actions require a target in the Order.
 /// Config must never reach here — it is caught as unreachable to surface
-/// bugs early rather than silently misbehaving.
+/// routing bugs rather than silently misbehaving.
 pub fn execute_services(order: &Order) -> Result<Vec<String>, String> {
     match &order.action {
         Action::Meta(a) => match a.as_str() {
             "list" => {
                 // TODO: Return structured ServiceEntry data instead of formatted strings.
-                // Formatted strings work for the CLI but block future GUI/TUI frontends
-                // from rendering their own layouts.
+                // Formatted strings work for the CLI but prevent future GUI/TUI frontends
+                // from applying their own layout. Deferred until a second frontend exists.
                 let entries = services::list_services()?;
                 Ok(entries
                     .iter()
@@ -38,7 +35,7 @@ pub fn execute_services(order: &Order) -> Result<Vec<String>, String> {
                     .collect())
             }
             "help" => Ok(services::help_service()),
-            "reset" => services::reset_service(),
+            "clean" => services::reset_service(),
             _ => Err(format!("Unknown meta action '{}'", a)),
         },
 
@@ -56,7 +53,7 @@ pub fn execute_services(order: &Order) -> Result<Vec<String>, String> {
 
         Action::Config => {
             // Config actions are planned and approved before execution.
-            // If this branch is reached, the engine has a routing bug.
+            // Reaching this branch means the engine has a routing bug.
             unreachable!("Config actions must go through execute_plan, not execute_normal")
         }
     }
@@ -65,8 +62,8 @@ pub fn execute_services(order: &Order) -> Result<Vec<String>, String> {
 /// Executes a pre-approved Plan by running its Steps in order.
 ///
 /// Fails fast on the first error — subsequent steps are not attempted.
-/// This is intentional: steps are ordered with dependencies (unmask → enable → start),
-/// so a failed early step makes later steps meaningless or harmful.
+/// Steps are ordered with dependencies (unmask → enable → start), so a
+/// failed early step makes later steps either meaningless or harmful.
 pub fn execute_services_plan(plan: &Plan) -> Result<Vec<String>, Vec<String>> {
     let mut output = vec![];
 

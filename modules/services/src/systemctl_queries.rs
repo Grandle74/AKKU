@@ -1,8 +1,15 @@
 // modules/services/src/systemctl_queries.rs
+//
+// Raw systemd queries and post-action validation for the Services module.
+//
+// Does not decide what to run or in what order — it only confirms whether
+// a systemd state transition landed where it was expected to.
+
 use std::process::Command;
 
-/// Properties queried from systemd after running a start/stop command.
-/// Used by `start_validation()` and `stop_validation()` to confirm the outcome.
+// ── Service Properties ────────────────────────────────────────────────────────
+
+/// Properties queried from systemd after a start or stop command.
 #[derive(Debug)]
 pub struct ServiceProperties {
     pub load_state: String,
@@ -31,8 +38,6 @@ impl ServiceProperties {
         props
     }
 
-    /// Parses a block of `systemctl show` output into `self`.
-    /// Called for both the primary poll and the post-active recheck.
     fn parse_systemctl_output(&mut self, text: &str) {
         for line in text.lines() {
             let mut parts = line.splitn(2, '=');
@@ -74,7 +79,7 @@ impl ServiceProperties {
 
     fn query_and_parse(&mut self, service: String) {
         // Poll until systemd is no longer mid-transition, then read final state.
-        // Checks every 150ms, gives up after 3 seconds total (20 attempts).
+        // 150 ms × 20 attempts = 3 s maximum wait.
         const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(150);
         const MAX_ATTEMPTS: usize = 20;
 
@@ -87,14 +92,14 @@ impl ServiceProperties {
             );
 
             if !still_transitioning {
-                // For active services: wait briefly, then recheck.
-                // Catches Type=simple services that exit immediately after start.
                 if self.active_state == "active" {
+                    // Type=simple services can appear "active" for a moment before
+                    // crashing. Wait briefly, then recheck.
                     std::thread::sleep(std::time::Duration::from_millis(800));
                     self.parse_systemctl_output(&Self::query_systemctl(&service));
 
-                    // If the service crashed after appearing active, the inactive
-                    // timestamp will now be newer than the active one.
+                    // A newer inactive timestamp means the service crashed after
+                    // the active snapshot was taken.
                     if self.inactive_enter_timestamp > self.active_enter_timestamp
                         && self.inactive_enter_timestamp != 0
                     {
@@ -114,11 +119,16 @@ impl ServiceProperties {
                 std::thread::sleep(POLL_INTERVAL);
             }
         }
-        // Fell through — state never settled. Validation layers will catch "activating" and fail.
+        // State never settled — validation layers will reject "activating".
     }
 }
 
-/// Returns an error if the service does not exist on this system.
+// ── Existence Check ───────────────────────────────────────────────────────────
+
+/// Returns an error if the service is not known to systemd.
+///
+/// Uses LoadState rather than the command exit code — `systemctl show` exits 0
+/// even for unknown units.
 pub fn validate_service_exists(service: &str) -> Result<(), Vec<String>> {
     let output = Command::new("systemctl")
         .args(["show", service, "--property=LoadState"])
@@ -127,7 +137,6 @@ pub fn validate_service_exists(service: &str) -> Result<(), Vec<String>> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // `systemctl show` exits 0 even for unknown units — LoadState is the ground truth.
     let load_state = stdout
         .lines()
         .find_map(|line| line.strip_prefix("LoadState="))
@@ -142,22 +151,16 @@ pub fn validate_service_exists(service: &str) -> Result<(), Vec<String>> {
 
 // ── Post-Action Validation ────────────────────────────────────────────────────
 
-/// Verifies that the service is running after a start/reload command.
+/// Verifies that the service is running after a start or reload command.
 pub fn start_validation(service: &str) -> Result<Vec<String>, Vec<String>> {
     let props = ServiceProperties::new(service.to_string());
     let mut messages: Vec<String> = Vec::new();
 
-    // Layer 1: Service must be loaded.
     match props.load_state.as_str() {
         "loaded" => messages.push("Service exists and loaded correctly".to_string()),
         "masked" => return fail(messages, "Service is masked"),
         "error" => return fail(messages, "Configuration file has an error"),
-        _ => {
-            return fail(
-                messages,
-                format!("Service '{}' doesn't exist", service).as_str(),
-            );
-        }
+        _ => return fail(messages, &format!("Service '{}' doesn't exist", service)),
     }
 
     messages.push(match &props.main_pid {
@@ -165,7 +168,6 @@ pub fn start_validation(service: &str) -> Result<Vec<String>, Vec<String>> {
         None => "Main PID: None - not running".to_string(),
     });
 
-    // Layer 2: Check exit code of the main process.
     match props.exec_main_status {
         Some(0) => {}
         Some(1) => return fail(messages, "Service crashed"),
@@ -181,19 +183,16 @@ pub fn start_validation(service: &str) -> Result<Vec<String>, Vec<String>> {
         None => {}
     }
 
-    // Layer 3: Overall result must be "success".
     if props.result.as_str() != "success" {
         return Err(messages);
     }
 
-    // Layer 4: Active state.
     match props.active_state.as_str() {
         "active" => messages.push("Service is running".to_string()),
         "activating" | "deactivating" => return fail(messages, "Action stuck - Timeout"),
         _ => return fail(messages, "Failed to start service"),
     }
 
-    // Layer 5: Sub-state.
     match props.sub_state.as_str() {
         "running" => {}
         "exited" => return fail(messages, "Service exited with error"),
@@ -212,17 +211,12 @@ pub fn stop_validation(service: &str) -> Result<Vec<String>, Vec<String>> {
     let props = ServiceProperties::new(service.to_string());
     let mut messages: Vec<String> = Vec::new();
 
-    // Layer 1: Service must be loaded (or masked — masked services can be "stopped").
     match props.load_state.as_str() {
         "loaded" => messages.push("Service exists and loaded correctly".to_string()),
+        // Masked services are already "stopped" by definition.
         "masked" => messages.push("Service is masked".to_string()),
         "error" => return fail(messages, "Configuration file has an error"),
-        _ => {
-            return fail(
-                messages,
-                format!("Service '{}' doesn't exist", service).as_str(),
-            );
-        }
+        _ => return fail(messages, &format!("Service '{}' doesn't exist", service)),
     }
 
     messages.push(match &props.main_pid {
@@ -230,7 +224,6 @@ pub fn stop_validation(service: &str) -> Result<Vec<String>, Vec<String>> {
         None => "Main PID: None - not running".to_string(),
     });
 
-    // Layer 2: Check exit code.
     match props.exec_main_status {
         Some(0) => {}
         Some(1) => return fail(messages, "Service crashed"),
@@ -246,19 +239,16 @@ pub fn stop_validation(service: &str) -> Result<Vec<String>, Vec<String>> {
         None => {}
     }
 
-    // Layer 3: Overall result must be "success".
     if props.result.as_str() != "success" {
         return Err(messages);
     }
 
-    // Layer 4: Active state must be "inactive".
     match props.active_state.as_str() {
         "inactive" => messages.push("Service is inactive".to_string()),
         "activating" | "deactivating" => return fail(messages, "Action stuck - Timeout"),
         _ => return fail(messages, "Failed to stop service"),
     }
 
-    // Layer 5: Sub-state.
     match props.sub_state.as_str() {
         "dead" | "inactive" => {}
         "exited" => return fail(messages, "Service exited with error"),
@@ -271,6 +261,7 @@ pub fn stop_validation(service: &str) -> Result<Vec<String>, Vec<String>> {
     Ok(messages)
 }
 
+/// Verifies that the service's mask state matches `expect_masked`.
 pub fn mask_validation(service: &str, expect_masked: bool) -> Result<Vec<String>, Vec<String>> {
     let output = Command::new("systemctl")
         .args(["is-enabled", service])
@@ -295,6 +286,7 @@ pub fn mask_validation(service: &str, expect_masked: bool) -> Result<Vec<String>
     }
 }
 
+/// Verifies that the service's enable state matches `expect_enabled`.
 pub fn enable_disable_validation(
     service: &str,
     expect_enabled: bool,
@@ -313,22 +305,18 @@ pub fn enable_disable_validation(
         "enabled" if expect_enabled => Ok(vec![format!("Current state: {}", state)]),
         "disabled" if !expect_enabled => Ok(vec![format!("Current state: {}", state)]),
         "masked" => Err(vec!["Service is masked".to_string()]),
+        // "static" units have no [Install] section — enable/disable is a no-op.
         "static" => Err(vec![
             "Service is static — cannot be enabled/disabled".to_string(),
         ]),
-        "not-found" => Err(vec![
-            format!("Service '{}' doesn't exist", service)
-                .as_str()
-                .to_string(),
-        ]),
+        "not-found" => Err(vec![format!("Service '{}' doesn't exist", service)]),
         _ => Err(vec![format!("Unexpected state: {}", state)]),
     }
 }
 
 // ── Internal Helper ───────────────────────────────────────────────────────────
 
-/// Appends a final error message to `messages` and returns it as `Err`.
-/// Avoids repeating the push + return pattern throughout validation layers.
+/// Appends `reason` to `messages` and returns the vec as `Err`.
 fn fail(mut messages: Vec<String>, reason: &str) -> Result<Vec<String>, Vec<String>> {
     messages.push(reason.to_string());
     Err(messages)

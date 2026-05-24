@@ -16,7 +16,6 @@ name = "api"
 version = "0.1.0"
 dependencies = [
  "engine",
- "serde_json",
 ]
 
 [[package]]
@@ -79,8 +78,6 @@ dependencies = [
  "api",
  "crossterm",
  "rustyline",
- "serde",
- "serde_json",
 ]
 
 [[package]]

@@ -2,26 +2,30 @@
 //
 // Cross-crate type definitions shared by every layer of AKKU.
 //
-// Dependency rule: this crate has ZERO internal dependencies — it only uses
-// the standard library and serde. All other crates depend on this one.
-// Never pull engine or module types into here.
+// Does not own execution logic, I/O, or any layer-specific behaviour — if a
+// type needs to call into the engine or a module, it belongs elsewhere.
+//
+// Zero internal dependencies: only std and serde. All other crates depend on
+// this one; it must never depend on them.
 
-// ── Core Intent Types ────────────────────────────────────────────────────────
+// ── Domain & Action Types ─────────────────────────────────────────────────────
 
-/// The module (system domain) an Order targets.
-/// Each Domain maps 1-to-1 to a Module crate via `module_resolver`.
+/// The system domain an Order targets.
+///
+/// Each variant maps 1-to-1 to a module crate resolved at runtime by
+/// `module_resolver`. Adding a domain here requires a matching module.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum Domain {
     Services,
     // Future: Packages, Users, Network ...
 }
 
-/// What kind of operation an Order requests.
+/// The kind of operation an Order requests.
 ///
-/// Three variants cover the entire intent space:
+/// Three variants cover the full intent space:
 /// - `Meta`   — no target, no properties (list, help, reset)
-/// - `Config` — declarative desired-state with properties; triggers Plan/approve flow
-/// - `Custom` — imperative single action with a target (start, stop, status …)
+/// - `Config` — declarative desired-state; triggers the Plan/approve flow
+/// - `Custom` — imperative single action with a named target (start, stop, …)
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum Action {
     Meta(String),
@@ -30,21 +34,21 @@ pub enum Action {
 }
 
 impl Action {
-    /// Returns true for actions whose output is purely informational and should
-    /// NOT receive the leading "✔ " success prefix in the Frontend.
+    /// Return true when the action's output is purely informational.
     ///
-    /// Centralised here so the Frontend never needs to string-match action names.
+    /// Centralised here so the frontend never string-matches action names to
+    /// decide whether to prefix output with "✔ ".
     pub fn is_informational(&self) -> bool {
         matches!(self, Action::Meta(_)) || matches!(self, Action::Custom(s) if s == "status")
     }
 
-    /// Returns the action name as a plain string.
-    /// Used by plan_store to write a flat, human-readable action field
-    /// instead of the enum's serialized form.
+    /// Return the action name as a plain string.
+    ///
+    /// Used by `plan_store` to write a flat, human-readable action field
+    /// rather than the enum's serialized form.
     pub fn as_str(&self) -> &str {
         match self {
-            Action::Custom(s) => s.as_str(),
-            Action::Meta(s) => s.as_str(),
+            Action::Custom(s) | Action::Meta(s) => s.as_str(),
             Action::Config => "config",
         }
     }
@@ -53,22 +57,20 @@ impl Action {
 impl From<&str> for Action {
     fn from(s: &str) -> Self {
         match s {
-            // Meta: no target required, handled entirely inside the engine dispatcher.
-            "list" | "help" | "reset" => Action::Meta(s.to_string()),
-            // Config: declarative desired-state — engine builds a Plan, awaits approval.
+            "list" | "help" | "clean" => Action::Meta(s.to_string()),
+            // Aliases kept narrow deliberately — "config" is the canonical form.
             "config" | "change" | "cfg" => Action::Config,
-            // Everything else is a Custom imperative action routed to the module.
             _ => Action::Custom(s.to_string()),
         }
     }
 }
 
-// ── Shared Engine / Module Types ─────────────────────────────────────────────
+// ── Property Types ────────────────────────────────────────────────────────────
 
-/// A typed property value used in declarative Config orders.
+/// A typed property value used in declarative `Config` orders.
 ///
-/// Keeps the property system generic so any future module can reuse it
-/// without requiring engine changes.
+/// Keeping this generic means future modules reuse the same property system
+/// without CORE changes.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum PropertyValue {
     Bool(bool),
@@ -77,6 +79,7 @@ pub enum PropertyValue {
 }
 
 impl PropertyValue {
+    /// Return the inner bool, or `None` if the variant is not `Bool`.
     pub fn as_bool(&self) -> Option<bool> {
         if let Self::Bool(v) = self {
             Some(*v)
@@ -85,6 +88,7 @@ impl PropertyValue {
         }
     }
 
+    /// Return the inner string slice, or `None` if the variant is not `String`.
     pub fn as_str_value(&self) -> Option<&str> {
         if let Self::String(v) = self {
             Some(v)
@@ -93,6 +97,7 @@ impl PropertyValue {
         }
     }
 
+    /// Return the inner integer, or `None` if the variant is not `Number`.
     pub fn as_number(&self) -> Option<i64> {
         if let Self::Number(v) = self {
             Some(*v)
@@ -102,37 +107,21 @@ impl PropertyValue {
     }
 }
 
-// ── Plan Execution Types ─────────────────────────────────────────────────────
+// ── Plan Execution Types ──────────────────────────────────────────────────────
 
-/// The diff between a service's current state and its desired state.
-///
-/// Produced by `state_helpers::calc()`. Each `needs_*` flag represents
-/// one concrete systemctl operation. The ordering in `to_steps()` is
-/// deliberately fixed: unmask → enable → start / stop → disable → mask.
-pub struct Delta {
-    pub target: Option<String>,
-    pub needs_start: bool,
-    pub needs_stop: bool,
-    pub needs_mask: bool,
-    pub needs_unmask: bool,
-    pub needs_enable: bool,
-    pub needs_disable: bool,
-    pub needs_reset_failed: bool,
-}
-
-/// An ordered list of atomic operations to execute in sequence.
+/// An ordered sequence of atomic operations to execute.
 pub type Steps = Vec<Step>;
 
 /// A single atomic operation within a Plan.
 ///
-/// Carries enough data to be dispatched to the correct module function
-/// and to reconstruct a human-readable description for the audit log.
+/// Carries enough data to dispatch to the correct module function and to
+/// produce a human-readable line in the audit log.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct Step {
     pub domain: Domain,
     pub action: Action,
     pub target: String,
-    /// Human-readable summary used in plan output and saved to the plan file.
+    /// Human-readable summary written to plan output and the plan file.
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
@@ -141,6 +130,7 @@ pub struct Step {
 }
 
 impl Step {
+    /// Construct a `Custom` step with a derived description.
     pub fn new(domain: Domain, action: &str, target: &str) -> Self {
         Step {
             description: format!("{} {}", action, target),
@@ -151,4 +141,60 @@ impl Step {
             output: None,
         }
     }
+}
+
+// ── Plan History Types ────────────────────────────────────────────────────────
+
+/// A fully prepared plan record for frontend consumption.
+///
+/// Built by `plan_store` from persisted data — never constructed by frontends.
+/// All fields are pre-processed: `date` is already formatted, `summary` is
+/// already built. Frontends render; they do not transform.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct PlanSummary {
+    pub id: String,
+    pub target: String,
+    pub status: String,
+    /// Human-readable creation time, derived from the plan ID by `plan_store`.
+    pub date: String,
+    /// One-line action summary, e.g. "enable, start nginx" or "rolled back svc_...".
+    pub summary: String,
+    pub steps: Vec<StepSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rollback_of: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+
+impl PlanSummary {
+    pub fn is_empty(&self) -> bool {
+        self.id.is_empty()
+    }
+
+    /// Sentinel value returned when planning produces no steps — target is already at desired state.
+    pub fn empty() -> Self {
+        PlanSummary {
+            id: String::new(),
+            target: String::new(),
+            status: String::new(),
+            date: String::new(),
+            summary: String::new(),
+            steps: vec![],
+            rollback_of: None,
+            mode: None,
+        }
+    }
+}
+
+/// A single step record within a `PlanSummary`.
+///
+/// Strips the dispatch fields (`domain`, `action`, `target`) — frontends
+/// need description and execution result only.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct StepSummary {
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<Vec<String>>,
 }

@@ -42,7 +42,7 @@ Where Ansible orchestrates fleets and NixOS rebuilds entire systems, AKKU does o
 | CLI `commando` *(reference frontend)*   | ✅ Done        |
 | `systemd` Service Module                | 🔧 In Progress |
 | Smart Error Awareness                   | 🔜 Planned     |
-| Module Manager                          | 🔜 Planned     |
+| Modules Manager                         | 🔜 Planned     |
 | Third-party Modules                     | 🔜 Planned     |
 
 ## Architecture
@@ -55,8 +55,8 @@ AKKU/                    # each crate follows: 'src/' + 'docs/'
 ├── api/                 # Orchestration layer
 ├── engine/              # Core engine
 ├── shared/              # Shared types and utilities
+├── modules_manager/      # Planned
 ├── modules/             # Modules library
-│   ├── module_manager/  # Planned
 │   └── services/        # systemd service module
 ├── tests/               # Planned
 ├── ui_concept/          # Future GUI concept as HTML pages
@@ -102,7 +102,7 @@ Track live progress on the [v0.1 Milestone](https://github.com/Grandle74/AKKU/mi
 
 ### v0.1 — Foundations
 - Hardened end-to-end core (API + Engine)
-- Module Manager — the backbone of AKKU's module ecosystem
+- Modules Manager — initial design captured in [`ModulesManager.md`](ModulesManager.md)
 - `systemd` service module reworked as a solid first-party reference
 - A second lightweight module to validate the module system
 - CI setup and minimum supported Rust version pinned

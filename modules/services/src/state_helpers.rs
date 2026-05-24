@@ -2,18 +2,32 @@
 //
 // Pure state-diffing logic for the Services module.
 //
-// Responsibility: given a service name and a desired property map,
-// produce an ordered list of Steps that will move the service from
-// its current state to the desired state — without executing anything.
-//
-// This file has NO side effects. It only reads from systemctl (via queries)
-// and produces data structures. The executor runs the Steps.
+// Does not execute anything — produces Steps for the executor to run.
+// Does not validate conflicts — that responsibility belongs to the API layer.
 
-use shared_libs::{Delta, Domain, PropertyValue, Step, Steps};
+use shared_libs::{Domain, PropertyValue, Step, Steps};
 use std::collections::HashMap;
 use std::process::Command;
 
-// ── Current State ────────────────────────────────────────────────────────────
+// ── Delta ─────────────────────────────────────────────────────────────────────
+
+/// Diff between a service's current state and its desired state.
+///
+/// Each `needs_*` flag corresponds to one concrete `systemctl` call.
+/// Step ordering is fixed in `to_steps` and must not be reordered by callers:
+/// unmask → enable → start / stop → disable → mask.
+pub struct Delta {
+    pub target: Option<String>,
+    pub needs_start: bool,
+    pub needs_stop: bool,
+    pub needs_mask: bool,
+    pub needs_unmask: bool,
+    pub needs_enable: bool,
+    pub needs_disable: bool,
+    pub needs_reset_failed: bool,
+}
+
+// ── Current State ─────────────────────────────────────────────────────────────
 
 /// The live state of a service as reported by systemd.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -28,12 +42,10 @@ pub struct ServiceCurrentState {
 impl ServiceCurrentState {
     /// Queries systemd for the current state of `name`.
     ///
-    /// Uses `systemctl show` instead of `is-enabled` + `is-active` to get all
-    /// properties in a single round-trip. Returns `Err` if the service unit
-    /// cannot be found on this system.
+    /// Uses `systemctl show` rather than separate `is-enabled` + `is-active`
+    /// calls to get all properties in a single round-trip. Returns `Err` if
+    /// the unit is unknown to systemd.
     pub fn new(name: &str) -> Result<Self, String> {
-        // `systemctl show` is reliable for both file-backed and transient units.
-        // Exit code 0 means the unit is known to systemd — even if inactive.
         let output = Command::new("systemctl")
             .args([
                 "show",
@@ -63,7 +75,6 @@ impl ServiceCurrentState {
             }
         }
 
-        // A unit that systemd has never heard of has LoadState "not-found".
         if load_state == "not-found" {
             return Err(format!("Service '{}' doesn't exist", name));
         }
@@ -71,7 +82,7 @@ impl ServiceCurrentState {
         Ok(Self {
             name: name.to_string(),
             active: active_state == "active",
-            // "static" means the unit has no [Install] section but IS enabled in practice.
+            // "static" means no [Install] section but the unit is enabled in practice.
             enabled: matches!(unit_file_state.as_str(), "enabled" | "static"),
             masked: unit_file_state == "masked",
             failed: active_state == "failed",
@@ -81,10 +92,10 @@ impl ServiceCurrentState {
 
 // ── Desired State ─────────────────────────────────────────────────────────────
 
-/// The state the user declared via Config properties.
+/// The state the user declared via property map.
 ///
 /// Fields are `Option<bool>` — `None` means "don't care, leave as-is".
-/// Only fields set by the user participate in the diff.
+/// Only fields the user explicitly set participate in the diff.
 pub struct ServiceDesiredState {
     pub name: String,
     pub active: Option<bool>,
@@ -93,6 +104,7 @@ pub struct ServiceDesiredState {
 }
 
 impl ServiceDesiredState {
+    /// Builds a desired state from the property map supplied by the API layer.
     pub fn from_props(name: &str, props: &HashMap<String, PropertyValue>) -> Result<Self, String> {
         Ok(ServiceDesiredState {
             name: name.to_string(),
@@ -105,10 +117,10 @@ impl ServiceDesiredState {
 
 // ── Diff & Step Generation ────────────────────────────────────────────────────
 
-/// Compares current vs desired and returns which operations are required.
+/// Returns which operations are required to move `current` to `desired`.
 ///
-/// A flag is set only when the desired value *differs* from the current value.
-/// Fields where desired is `None` are left untouched.
+/// A flag is set only when the desired value differs from the current value.
+/// Properties where desired is `None` are left untouched.
 pub fn calc(current: &ServiceCurrentState, desired: &ServiceDesiredState) -> Delta {
     Delta {
         target: Some(current.name.clone()),
@@ -118,25 +130,29 @@ pub fn calc(current: &ServiceCurrentState, desired: &ServiceDesiredState) -> Del
         needs_disable: desired.enabled == Some(false) && current.enabled,
         needs_unmask: desired.masked == Some(false) && current.masked,
         needs_mask: desired.masked == Some(true) && !current.masked,
+        // Reset failed state whenever the user is asking for an active or
+        // enabled transition — a failed unit silently blocks both.
         needs_reset_failed: current.failed
             && (desired.active.is_some() || desired.enabled.is_some()),
     }
 }
 
-/// Converts a Delta into an ordered list of Steps.
+/// Converts a Delta into an ordered list of Steps ready for the executor.
 ///
-/// Order is critical and intentional:
-///   unmask  → must happen before enable/start (a masked unit rejects both)
-///   enable  → before start (start without enable works but violates declarative intent)
-///   start   → positive state changes before negative
+/// Order is critical:
+///   reset   → clean step; clears failed state before any transition attempt
+///   unmask  → before enable/start (a masked unit rejects both)
+///   enable  → before start
+///   start   → positive changes before negative
 ///   stop    → negative changes follow positive
 ///   disable → after stop
 ///   mask    → last, so we don't mask something we just started
+///
+/// Reset comes first because a failed unit silently blocks enable and start.
 pub fn to_steps(delta: &Delta) -> Steps {
     let mut steps = vec![];
     let target = delta.target.as_deref().unwrap_or_default();
 
-    // Cleaning service failure if failed at somepoint
     if delta.needs_reset_failed {
         steps.push(Step::new(Domain::Services, "reset", target));
     }
