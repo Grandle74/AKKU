@@ -239,7 +239,7 @@ real-state validator.
 
 | Term | Definition |
 |------|------------|
-| **Domain** | The system area an operation targets (e.g. `Services`). Maps 1-to-1 to a module crate. |
+| **Domain** | The system area an operation targets (e.g. `Services`). Resolved at runtime to the installed module that handles it. |
 | **Action** | The kind of operation requested — `Meta` (no target), `Config` (declarative), or `Custom` (imperative). |
 | **Order** | The fully parsed instruction assembled by the API and handed to the engine. Carries domain, action, target, properties, and run mode. |
 | **Properties** | Key-value pairs attached to a `Config` intent that declare the desired state (e.g. `running=true`). Parsed by the CLI, validated by the API, and consumed by the planner during diffing. |
