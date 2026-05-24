@@ -32,7 +32,7 @@ pub struct Plan {
     /// Set when this plan is itself a rollback. Signals `approve_plan` to skip
     /// snapshot capture — capturing here would overwrite the pre-change snapshot.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) rollback_of: Option<String>,
+    pub rollback_of: Option<String>,
 }
 
 // ── ID Generation ─────────────────────────────────────────────────────────────
@@ -88,6 +88,7 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
         target: target.to_string(),
         status: None,
         steps,
+        status: "pending".to_string(),
         rollback_of: None,
         mode: None,
     }))

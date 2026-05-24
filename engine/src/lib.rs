@@ -18,7 +18,7 @@ mod plan_store;
 mod planner;
 mod snapshot;
 
-use planner::Plan;
+pub use planner::Plan;
 
 // ── Core Types ────────────────────────────────────────────────────────────────
 
@@ -161,4 +161,8 @@ pub fn build_rollback_plan(origin_plan_id: &str) -> Result<PlanSummary, Vec<Stri
 /// Returns all persisted plans as ready-to-consume summaries, sorted oldest-first.
 pub fn list_plans() -> Result<Vec<PlanSummary>, String> {
     plan_store::list_plans()
+}
+
+pub fn list_plans() -> Result<Vec<Plan>, String> {
+    plan_store::list_all()
 }

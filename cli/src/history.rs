@@ -24,7 +24,7 @@ use std::io::{self, Write};
 
 /// Launch the history TUI.
 ///
-/// Exits cleanly on Esc, Ctrl-C, or after a rollback completes.
+/// Exits cleanly on Esc, Ctrl-C.
 /// All errors that would crash the TUI are surfaced as plain text instead —
 /// the terminal is always restored before returning.
 pub fn show_history() {
@@ -487,8 +487,18 @@ fn draw_popup(
 
     body.push((format!("  {}", sep), Color::DarkGrey));
 
-    if let Some(warn) = conflict_warning(&state.entries, state.selected) {
-        body.push((format!("  ⚠  {}", warn), Color::Yellow));
+    match api::plans_after_touching_target(&entry.id) {
+        Ok(0) => {}
+        Ok(count) => body.push((
+            format!(
+                "  ⚠  {} later completed plan{} also touched '{}'",
+                count,
+                if count == 1 { "" } else { "s" },
+                entry.target
+            ),
+            Color::Yellow,
+        )),
+        Err(e) => body.push((format!("  {}", e), Color::DarkGrey)),
     }
 
     let inner_width = body
