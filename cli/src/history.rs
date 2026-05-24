@@ -637,35 +637,6 @@ fn draw_footer(
     queue!(stdout, ResetColor).map_err(|e| e.to_string())
 }
 
-// ── Conflict detection ────────────────────────────────────────────────────────
-
-// "After" means a later position in the sorted list (newest-last).
-// Returns None when there is no conflict to warn about.
-//
-// TODO: Move to engine (plan_store) and expose through the API once a broader
-// use case exists beyond the TUI. Domain judgement should not live here.
-fn conflict_warning(entries: &[PlanSummary], selected: usize) -> Option<String> {
-    let target = &entries[selected].target;
-
-    let conflicts: Vec<&str> = entries[selected + 1..]
-        .iter()
-        .filter(|e| e.target == *target && e.status == "completed")
-        .map(|e| e.id.as_str())
-        .collect();
-
-    if conflicts.is_empty() {
-        return None;
-    }
-
-    let count = conflicts.len();
-    Some(format!(
-        "{} later completed plan{} also touched '{}'",
-        count,
-        if count == 1 { "" } else { "s" },
-        target
-    ))
-}
-
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 fn scroll_offset(selected: usize, visible_rows: usize) -> usize {

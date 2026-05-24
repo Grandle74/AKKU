@@ -88,7 +88,6 @@ pub fn create_plan(module: &ModuleId, order: &Order) -> Result<Option<Plan>, Str
         target: target.to_string(),
         status: None,
         steps,
-        status: "pending".to_string(),
         rollback_of: None,
         mode: None,
     }))

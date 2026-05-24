@@ -264,10 +264,6 @@ fn parse_domain(s: &str) -> Result<Domain, String> {
     }
 }
 
-pub fn list_plans() -> Result<Vec<Plan>, String> {
-    engine::list_plans()
-}
-
 // ── ID parsing ────────────────────────────────────────────────────────────────
 
 /// Extracts the human-readable date portion from a plan ID.
