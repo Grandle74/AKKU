@@ -1,33 +1,13 @@
 // cli/src/history.rs
 //
-// History browser: an interactive TUI for reviewing past plans and
-// triggering manual rollback.
+// Interactive TUI for reviewing past plans and triggering manual rollback.
 //
-// Layout (terminal-width responsive):
+// This module has no rollback logic — it is display and routing only.
+// All state transitions live in the API and engine layers.
 //
-//   ┌─ History ─────────────────────────────────────────────────────────┐
-//   │ [left ~1/3]          │ [right ~2/3]                               │
-//   │  scrollable list     │  selected plan detail                      │
-//   │  ↑/↓ to navigate     │                                            │
-//   │  Enter to rollback   │                                            │
-//   │  Esc to exit         │                                            │
-//   └──────────────────────┴────────────────────────────────────────────┘
-//
-// Responsibilities:
-//   - Fetch plan summaries via the API (read-only — never writes).
-//   - Render the split-pane TUI via crossterm.
-//   - Warn before rollback if newer completed plans touched the same target.
-//   - Generate a rollback plan preview via `api::preview_rollback_intent`
-//     (first Enter), then execute it via `api::approve_intent` (second Enter).
-//
-// Rollback is a two-step flow in the TUI:
-//   1. First Enter  → preview_rollback_intent: generates + saves the rollback plan.
-//                     The popup shows its steps (the restoration, not the failure).
-//   2. Second Enter → approve_intent(plan, true): executes the saved plan.
-//      Esc           → cancels, discards the pending plan.
-//
-// This module has zero rollback logic of its own — it is display and
-// routing only. All state transitions live in the API and engine layers.
+// Rollback is a two-step flow: first Enter generates and previews the rollback
+// plan via preview_rollback_intent; second Enter executes it via approve_intent.
+// Esc on the popup cancels and rejects the pending plan.
 
 use api::{IntentOutcome, PlanSummary, approve_intent, list_plans, preview_rollback_intent};
 
@@ -42,7 +22,7 @@ use std::io::{self, Write};
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
-/// Launches the history TUI. Called by `main` when the user types `history`.
+/// Launch the history TUI.
 ///
 /// Exits cleanly on Esc, Ctrl-C, or after a rollback completes.
 /// All errors that would crash the TUI are surfaced as plain text instead —
@@ -70,16 +50,13 @@ pub fn show_history() {
 
 // ── TUI loop ──────────────────────────────────────────────────────────────────
 
-/// State for the running TUI session.
 struct TuiState {
     entries: Vec<PlanSummary>,
     selected: usize,
-    /// Feedback line shown at the bottom after an action (rollback result, warning).
     message: Option<String>,
-    /// True when the rollback preview popup is open and the next Enter fires.
+    // Modal: navigation is blocked while the popup is open.
     showing_popup: bool,
-    /// The generated rollback plan shown in the popup, awaiting user confirmation.
-    /// Set when showing_popup becomes true; consumed (and cleared) on confirmation.
+    // Set on first Enter (preview), consumed on second Enter (confirm) or Esc (cancel).
     pending_rollback_plan: Option<PlanSummary>,
 }
 
@@ -97,7 +74,6 @@ fn run_tui(entries: Vec<PlanSummary>) -> Result<(), String> {
         pending_rollback_plan: None,
     };
 
-    // Initial draw before waiting for the first keypress.
     draw(&mut stdout, &state)?;
 
     loop {
@@ -174,14 +150,9 @@ fn run_tui(entries: Vec<PlanSummary>) -> Result<(), String> {
     Ok(())
 }
 
-/// Handles an Enter keypress.
-///
-/// First Enter: call `preview_rollback_intent` to generate (and save) the
-/// rollback plan, then open the popup showing its steps — NOT the failed plan.
-/// Second Enter (popup open): fire `approve_intent` with the stored plan.
-///
-/// After a successful rollback the entries are reloaded from disk so the
-/// new rollback plan appears in the list without requiring a TUI restart.
+// The popup shows the rollback plan's steps, not the original failed plan's steps.
+// Entries are reloaded after both approval and cancellation so the new plan
+// appears in the list without requiring a TUI restart.
 fn handle_enter(state: &mut TuiState) {
     let entry = &state.entries[state.selected];
 
@@ -211,7 +182,6 @@ fn handle_enter(state: &mut TuiState) {
             }
         }
 
-        // Reload on approval, same as the Esc/rejection path.
         if let Ok(fresh) = list_plans() {
             if state.selected >= fresh.len() {
                 state.selected = fresh.len().saturating_sub(1);
@@ -329,14 +299,12 @@ fn draw_panes(
     divider_col: usize,
     right_width: usize,
 ) -> Result<(), String> {
-    // Scroll offset: keep the selected row visible.
     let scroll = scroll_offset(state.selected, content_rows);
 
     for row in 0..content_rows {
         let screen_row = (row + 2) as u16; // +2: header + column-label row
         let entry_idx = scroll + row;
 
-        // ── Left pane ─────────────────────────────────────────────────────────
         queue!(stdout, cursor::MoveTo(0, screen_row)).map_err(|e| e.to_string())?;
 
         if let Some(entry) = state.entries.get(entry_idx) {
@@ -347,7 +315,6 @@ fn draw_panes(
             queue!(stdout, Print(" ".repeat(left_width))).map_err(|e| e.to_string())?;
         }
 
-        // ── Divider ───────────────────────────────────────────────────────────
         queue!(
             stdout,
             cursor::MoveTo(divider_col as u16, screen_row),
@@ -357,7 +324,6 @@ fn draw_panes(
         )
         .map_err(|e| e.to_string())?;
 
-        // ── Right pane: only for the selected entry's rows ────────────────────
         let detail_start_row = 2u16;
         let detail_row = screen_row.saturating_sub(detail_start_row) as usize;
         let detail_lines = build_detail(state, right_width);
@@ -375,7 +341,6 @@ fn draw_panes(
         }
     }
 
-    // Column labels on row 1 (between header and first entry).
     draw_column_labels(stdout, left_width, divider_col, right_width)
 }
 
@@ -446,13 +411,11 @@ fn draw_list_row(
     }
 }
 
-/// Builds the right-pane detail lines for the currently selected entry.
 fn build_detail(state: &TuiState, width: usize) -> Vec<String> {
     let entry = &state.entries[state.selected];
     let sep = "─".repeat(width.min(48));
     let mut lines: Vec<String> = Vec::new();
 
-    // ── Identity ──────────────────────────────────────────────────────────────
     lines.push(format!("Plan    {}", entry.id));
     lines.push(format!("Target  {}", entry.target));
     lines.push(format!("Date    {}", entry.date));
@@ -473,7 +436,6 @@ fn build_detail(state: &TuiState, width: usize) -> Vec<String> {
 
     lines.push(sep.clone());
 
-    // ── Steps with per-step execution status ──────────────────────────────────
     if entry.steps.is_empty() {
         lines.push("  (no steps recorded)".into());
     } else {
@@ -494,21 +456,6 @@ fn build_detail(state: &TuiState, width: usize) -> Vec<String> {
     lines
 }
 
-/// Draws the rollback confirmation popup — a floating box centered over the TUI.
-///
-/// Layout:
-///   ╭─ Confirm Rollback ──────────────────────────────╮
-///   │  Restoring  nginx                               │
-///   │  Origin     svc_20260407_143022_a3f2            │
-///   │  ─────────────────────────────────────────────  │
-///   │    • unmask nginx                               │
-///   │    • enable nginx                               │
-///   │    • start nginx                                │
-///   │  ─────────────────────────────────────────────  │
-///   │    1 later completed plan also touched 'nginx'  │  (if conflict)
-///   ├─────────────────────────────────────────────────┤
-///   │        [ Enter: Apply ]   [ Esc: Cancel ]       │
-///   ╰─────────────────────────────────────────────────╯
 fn draw_popup(
     stdout: &mut impl Write,
     state: &TuiState,
@@ -517,7 +464,6 @@ fn draw_popup(
 ) -> Result<(), String> {
     let entry = &state.entries[state.selected];
 
-    // ── Build content lines ───────────────────────────────────────────────────
     let mut body: Vec<(String, Color)> = Vec::new();
 
     body.push((format!("  Restoring  {}", entry.target), Color::Reset));
@@ -545,7 +491,6 @@ fn draw_popup(
         body.push((format!("  ⚠  {}", warn), Color::Yellow));
     }
 
-    // ── Size the box ─────────────────────────────────────────────────────────
     let inner_width = body
         .iter()
         .map(|(l, _)| l.chars().count())
@@ -560,7 +505,6 @@ fn draw_popup(
     let col = cols.saturating_sub(box_width) / 2;
     let row = rows.saturating_sub(box_height) / 2;
 
-    // ── Top border ────────────────────────────────────────────────────────────
     let title = " Confirm Rollback ";
     let fill = box_width.saturating_sub(title.len() + 3);
     let top = format!("╭─{}{}╮", title, "─".repeat(fill));
@@ -573,7 +517,6 @@ fn draw_popup(
     )
     .map_err(|e| e.to_string())?;
 
-    // ── Body rows ─────────────────────────────────────────────────────────────
     for (i, (line, color)) in body.iter().enumerate() {
         let padded = format!("│{:<width$}│", format!("{}", line), width = box_width - 2);
         queue!(
@@ -586,7 +529,6 @@ fn draw_popup(
         .map_err(|e| e.to_string())?;
     }
 
-    // ── Mid divider ───────────────────────────────────────────────────────────
     let mid_row = row + 1 + body.len();
     let divider = format!("├{}┤", "─".repeat(box_width - 2));
     queue!(
@@ -598,7 +540,6 @@ fn draw_popup(
     )
     .map_err(|e| e.to_string())?;
 
-    // ── Action bar ────────────────────────────────────────────────────────────
     let apply = "[ Enter: Apply ]";
     let cancel = "[ Esc: Cancel ]";
     let gap = 3;
@@ -627,7 +568,6 @@ fn draw_popup(
     )
     .map_err(|e| e.to_string())?;
 
-    // ── Bottom border ─────────────────────────────────────────────────────────
     let bottom = format!("╰{}╯", "─".repeat(box_width - 2));
     queue!(
         stdout,
@@ -689,13 +629,10 @@ fn draw_footer(
 
 // ── Conflict detection ────────────────────────────────────────────────────────
 
-/// Returns a warning string if any plan *after* the selected one also
-/// completed changes on the same target.
-///
-/// "After" is defined by position in the sorted list (newest-last).
-/// Returns None when it is safe to proceed without a warning.
-///
-// TODO: Move to engine (plan_store) and expose through API once a broader
+// "After" means a later position in the sorted list (newest-last).
+// Returns None when there is no conflict to warn about.
+//
+// TODO: Move to engine (plan_store) and expose through the API once a broader
 // use case exists beyond the TUI. Domain judgement should not live here.
 fn conflict_warning(entries: &[PlanSummary], selected: usize) -> Option<String> {
     let target = &entries[selected].target;
