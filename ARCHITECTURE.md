@@ -234,3 +234,25 @@ real-state validator.
 - `Steps` is the only type a module owes the engine. How the module
   reaches it — through `Delta` or any other internal type — is that
   module's private concern and must never move into `shared_libs`.
+
+## Glossary
+
+| Term | Definition |
+|------|------------|
+| **Domain** | The system area an operation targets (e.g. `Services`). Maps 1-to-1 to a module crate. |
+| **Action** | The kind of operation requested — `Meta` (no target), `Config` (declarative), or `Custom` (imperative). |
+| **Order** | The fully parsed instruction assembled by the API and handed to the engine. Carries domain, action, target, properties, and run mode. |
+| **Properties** | Key-value pairs attached to a `Config` intent that declare the desired state (e.g. `running=true`). Parsed by the CLI, validated by the API, and consumed by the planner during diffing. |
+| **Intent** | A user's raw input before it becomes an Order. Classified as bi-intent (2 tokens) or tri-intent (3+ tokens). |
+| **Bi-intent** | A two-token command with no target — domain + Meta action only (e.g. `service list`). |
+| **Tri-intent** | A three-or-more-token command that includes a target, optionally with properties (e.g. `service cfg nginx running=true`). |
+| **Delta** | The diff between a target's current state and its desired state. Produced by the planner; consumed by step generation. |
+| **Step** | A single atomic operation within a Plan (e.g. `enable nginx`). Steps are ordered and cannot be reordered by callers. |
+| **Plan** | An ordered list of Steps awaiting user approval. Persisted to disk as a `.plan.json` file in `~/.akku/plans/`. |
+| **PlanSummary** | A pre-processed, display-ready view of a Plan. Built by `plan_store`; frontends render it without transforming it. |
+| **Snapshot** | The captured pre-execution state of a target, saved before a Plan runs. Persisted to `~/.akku/snapshots/`. The source of truth for rollback. |
+| **RunMode** | How a Config intent is handled after planning — `Normal` (prompt), `DryRun` (show only), or `Force` (auto-approve). |
+| **Module** | A crate implementing domain and system specific logic (state querying, step execution). Multiple modules can serve the same domain — e.g. a `services-systemd` and `services-openrc` module both serving the `Services` domain. |
+| **ModuleId** | The engine-side identifier for an installed module. Resolved from a Domain by `module_resolver`. |
+| **commando** | The developer/tester reference CLI. Not a consumer-facing tool — a reference implementation for how frontends call the API. |
+| **History** | The persisted record of all Plans, accessible via the `history` command. Displayed in an interactive TUI that supports manual rollback. |
