@@ -43,6 +43,7 @@ Where Ansible orchestrates fleets and NixOS rebuilds entire systems, AKKU does o
 | `systemd` Service Module                | 🔧 In Progress |
 | Smart Error Awareness                   | 🔜 Planned     |
 | Modules Manager                         | 🔜 Planned     |
+| Tests                                   | 🔜 Planned     |
 | Third-party Modules                     | 🔜 Planned     |
 
 ## Architecture
