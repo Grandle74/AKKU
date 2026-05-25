@@ -49,6 +49,8 @@ Where Ansible orchestrates fleets and NixOS rebuilds entire systems, AKKU does o
 
 AKKU follows a strict unidirectional layered design — each layer communicates only with the one directly below it, never sideways or upward. Frontends are fully replaceable; the engine and modules are frontend-agnostic.
 
+For a full breakdown of the layered design, internal modules, plan/approve flow, rollback mechanics, and glossary — see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ```
 AKKU/                    # each crate follows: 'src/' + 'docs/'
 ├── cli/                 # Reference frontend (commando)
