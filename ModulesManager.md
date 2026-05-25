@@ -55,35 +55,20 @@ system.
 
 ## Relationship
  
-```
-               ┌─────────────────┐
-               │    Frontend     │
-               └────────┬────────┘
-                        │ all intents
-                        ▼
-               ┌─────────────────┐
-               │       API       │
-               └────────┬────────┘
-                        │ module management intents
-                        ▼
-               ┌─────────────────┐
-               │ Modules Manager │
-               └────────┬────────┘
-                        │ unpacks bundle
-           ┌────────────┴────────────┐
-           │                         │
-    ┌──────▼──────┐          ┌───────▼───────────────┐
-    │  API Part   │          │      Engine Part       │
-    │  validator  │          │  state helpers         │
-    │  properties │          │  real state validator  │
-    └──────┬──────┘          │  action handlers       │
-           │                 └───────┬────────────────┘
-           ▼                         ▼
-    ┌─────────────┐          ┌───────────────┐
-    │     API     │          │    Engine     │
-    │  domain →   │          │   domain →    │
-    │  validator  │          │   ModuleID    │
-    └─────────────┘          └───────────────┘
+```mermaid
+flowchart TD
+    Frontend --> |all intents| API
+
+    API --> |module management intents| MM[Modules Manager]
+
+    MM --> |unpacks bundle| AP["API Part
+validator · properties"]
+    MM --> |unpacks bundle| EP["Engine Part
+state helpers · real state validator
+action handlers"]
+
+    AP --> |"registers: domain → validator"| API
+    EP --> |"registers: domain → ModuleId"| Engine
 ```
 
 The frontend sends module management intents to the API. The API communicates

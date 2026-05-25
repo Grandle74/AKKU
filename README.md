@@ -100,8 +100,6 @@ commando(v0.1)~> service cfg nginx running=false --dry-run  # Dry-run mode
 
 ## Roadmap
 
-Track live progress on the [v0.1 Milestone](https://github.com/Grandle74/AKKU/milestone/1).
-
 ### v0.1 — Foundations
 - Hardened end-to-end core (API + Engine)
 - Modules Manager — initial design captured in [`ModulesManager.md`](ModulesManager.md)
